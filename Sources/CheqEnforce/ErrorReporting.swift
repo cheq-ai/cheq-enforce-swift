@@ -1,10 +1,3 @@
-//
-//  ErrorReporting.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 17/09/2025.
-//
-
 import Foundation
 import os
 
@@ -28,7 +21,7 @@ enum ErrorReporting {
         }
     }
     
-    /// Build the Referer URL: https://{host}/pc/{clientName}/sst
+    /// Build the Referer URL: https://{host}/privacy/environments/{clientName}
     private static func makeReferrer(from config: Config) -> URL? {
             var comps = URLComponents()
             comps.scheme = "https"
@@ -38,7 +31,7 @@ enum ErrorReporting {
             let encodedClient = config.clientName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
                 ?? config.clientName
 
-            comps.path = "/pc/\(encodedClient)/sst"
+            comps.path = "/privacy/environments/\(encodedClient)"
             return comps.url
         }
 

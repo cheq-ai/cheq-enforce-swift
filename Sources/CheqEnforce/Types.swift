@@ -1,12 +1,5 @@
-//
-//  Types.swift
-//  Enforce
-//
-//  Created by Connor Parfitt on 14/01/2025.
-//
-
 // MARK: - Configuration
-/// SST Configuration
+/// Enforce Configuration
 public struct Config {
     let clientName: String
     let publishPath: String

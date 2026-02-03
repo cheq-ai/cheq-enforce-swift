@@ -1,10 +1,3 @@
-//
-//  reporting.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 02/07/2025.
-//
-
 import Foundation
 import os
 

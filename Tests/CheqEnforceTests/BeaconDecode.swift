@@ -1,10 +1,3 @@
-//
-//  BeaconDecode.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 10/10/2025.
-//
-
 import Foundation
 import Compression
 import XCTest

@@ -1,10 +1,3 @@
-//
-//  CheqEnforce.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 17/01/2025.
-//
-
 import os
 import Foundation
 import UIKit

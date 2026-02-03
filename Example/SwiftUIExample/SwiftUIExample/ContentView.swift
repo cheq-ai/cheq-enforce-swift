@@ -1,10 +1,3 @@
-//
-//  ContentView.swift
-//  SwiftUIExample
-//
-//  Created by Connor Parfitt on 1/16/25.
-//
-
 import SwiftUI
 import CheqEnforce
 import os
