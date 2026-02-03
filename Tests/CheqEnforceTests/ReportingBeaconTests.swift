@@ -1,10 +1,3 @@
-//
-//  ReportingBeaconTests.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 10/10/2025.
-//
-
 import XCTest
 @testable import CheqEnforce
 

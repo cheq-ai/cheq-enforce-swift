@@ -1,10 +1,3 @@
-//
-//  lz4.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 02/07/2025.
-//
-
 import Foundation
 import Compression
 import os
