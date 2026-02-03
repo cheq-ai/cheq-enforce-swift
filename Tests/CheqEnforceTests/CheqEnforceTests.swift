@@ -1,9 +1,3 @@
-//
-//  CheqEnforceTests.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 03/04/2025.
-//
 import XCTest
 @testable import CheqEnforce
 

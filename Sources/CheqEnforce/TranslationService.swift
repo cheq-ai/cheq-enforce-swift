@@ -1,10 +1,3 @@
-//
-//  TranslationService.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 03/07/2025.
-//
-
 import Foundation
 import os
 

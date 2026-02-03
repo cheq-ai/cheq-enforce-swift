@@ -1,10 +1,3 @@
-//
-//  TranslationServiceTests.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 24/07/2025.
-//
-
 import XCTest
 @testable import CheqEnforce
 

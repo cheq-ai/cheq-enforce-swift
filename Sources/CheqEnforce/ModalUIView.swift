@@ -1,10 +1,3 @@
-//
-//  UIView.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 30/01/2025.
-//
-
 import UIKit
 
 public class CustomConsentModalViewController: UIViewController {
@@ -290,7 +283,7 @@ public class CustomConsentModalViewController: UIViewController {
     @objc private func dismissModal() {
         
         //If default consent provided in configuration, else set all to false
-        if var defaultConsent = config.defaultConsent as? [String: Bool],
+        if let defaultConsent = config.defaultConsent,
            defaultConsent.values.allSatisfy({ $0 == false || $0 == true }) {
             saveAndDismiss(consentData: defaultConsent)
         } else {
@@ -305,7 +298,7 @@ public class CustomConsentModalViewController: UIViewController {
     
     private func createConsentData(state: Bool) -> [String: Bool] {
         var consentData: [String: Bool] = [:]
-        for (index, section) in sections.enumerated() {
+        for (_, section) in sections.enumerated() {
             consentData[section.title] = state
         }
         return consentData

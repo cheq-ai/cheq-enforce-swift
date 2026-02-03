@@ -1,10 +1,3 @@
-//
-//  ConsentStore.swift
-//  CheqEnforce
-//
-//  Created by Connor Parfitt on 03/07/2025.
-//
-
 import Foundation
 
 /// Encapsulates all UserDefaults logic for storing + validating consent.
