@@ -11,7 +11,7 @@
 
 ### Sample App
 
-1. Ensure you do not have the local `Cheq` package opened in Xcode
+1. Ensure you do not have the local `CheqEnforce` package opened in Xcode
 2. Open `Example/SwiftUIExample/SwiftUIExample.xcodeproj`
 3. Deploy to simulator or device
 
@@ -21,4 +21,4 @@
 2. Update `Sources/CheqEnforce/Info.swift` library_version `static let library_version = "<VERSION>"` and commit
 3. `git flow release finish`
 4. `./push-github.sh`
-5. Verify documentation was published to https://cheq-ai.github.io/cheq-sst-enforce/
+5. Verify documentation was published to https://cheq-ai.github.io/cheq-enforce-swift/

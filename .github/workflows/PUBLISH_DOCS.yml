@@ -1,0 +1,32 @@
+name: PUBLISH DOCS
+
+on:
+  push:
+    branches: ["master"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate docs
+        run: |
+          xcodebuild docbuild -scheme CheqEnforce -destination 'platform=iOS Simulator,name=iPhone 15' -derivedDataPath /tmp/docs-build;
+          $(xcrun --find docc) process-archive transform-for-static-hosting /tmp/docs-build/Build/Products/Debug-iphonesimulator/CheqEnforce.doccarchive --output-path docs --hosting-base-path cheq-enforce-swift;
+          echo "{}" > docs/theme-settings.json;
+          echo "<script>window.location.href += \"/documentation/cheqenforce\"</script>" > docs/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: "docs"
+      - id: deployment
+        uses: actions/deploy-pages@v4
