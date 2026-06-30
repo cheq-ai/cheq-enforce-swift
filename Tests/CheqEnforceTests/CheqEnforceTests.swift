@@ -88,4 +88,33 @@ final class EnforceTests: XCTestCase {
     // wait for it
     wait(for: [exp], timeout: 1)
   }
+
+  func testClearConsentRemovesStoredData() async {
+    // seed some stored consent
+    Enforce.setConsent(["Analytics": true, "Marketing": true])
+    XCTAssertFalse(Enforce.getConsent().isEmpty, "Precondition: consent should be stored")
+
+    await Enforce.clearConsent()
+
+    XCTAssertTrue(Enforce.getConsent().isEmpty,
+                  "After clearConsent, getConsent() should be empty")
+    XCTAssertFalse(Enforce.checkConsent("Analytics"),
+                   "After clearConsent, checkConsent() should be false for all categories")
+    XCTAssertFalse(Enforce.checkConsent("Marketing"),
+                   "After clearConsent, checkConsent() should be false for all categories")
+  }
+
+  func testClearConsentNotifiesHandlersWithEmptyMap() async {
+    // seed some stored consent before registering the handler so the handler
+    // only observes the clearConsent() invocation
+    Enforce.setConsent(["X": true])
+
+    var received: [String: Bool]?
+    Enforce.onConsent { received = $0 }
+
+    await Enforce.clearConsent()
+
+    XCTAssertEqual(received, [:],
+                   "clearConsent should notify onConsent handlers with an empty map")
+  }
 }

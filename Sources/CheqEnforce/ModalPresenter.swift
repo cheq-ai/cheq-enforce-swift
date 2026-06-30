@@ -67,6 +67,7 @@ struct ModalPresenter {
                 saveTitle: saveTitle,
                 cancelTitle: cancelTitle
             )
+            Enforce.currentModal = modal
             rootVC.present(modal, animated: true, completion: nil)
         }
         

@@ -45,7 +45,9 @@ struct ContentView: View {
             Button("Set Environment") { setEnvironment() }
             Button("Show Banner") { showBanner() }
             Button("Show Modal") { showModal() }
-            
+            Button("Clear Consent") { clearConsent() }
+                .buttonStyle(ClearButtonStyle())
+
         }
         .buttonStyle(CustomButtonStyle())
         .padding()
@@ -108,6 +110,13 @@ struct ContentView: View {
         log.info("Show Modal tapped")
         Enforce.showModal()
     }
+
+    func clearConsent() {
+        log.info("Clear Consent tapped")
+        Task {
+            await Enforce.clearConsent()
+        }
+    }
     
     // Helper function to parse input into [String: Bool]
     func parseConsentInput(_ input: String) -> [String: Bool] {
@@ -134,6 +143,24 @@ struct CustomButtonStyle: ButtonStyle {
             .background(Color.blue)
             .foregroundColor(.white)
             .cornerRadius(10)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0) // Adds a press effect
+            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+    }
+}
+
+// Button style for the Clear Consent action: white background with a red border and text.
+struct ClearButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity) // Expands button width
+            .padding()
+            .background(Color.white)
+            .foregroundColor(.red)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.red, lineWidth: 1)
+            )
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0) // Adds a press effect
             .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
     }

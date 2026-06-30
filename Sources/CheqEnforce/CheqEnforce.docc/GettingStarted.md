@@ -68,6 +68,23 @@ Enforce.setConsent([
 
 > **Note:** You must have called configure(_:) first; otherwise the SDK logs an error.
 
+### Clearing Consent
+
+Use `clearConsent()` to programmatically remove all stored consent, reverting the user to a "no consent" state. This is useful for flows such as logout, account switch, or an in-app "reset privacy" action.
+
+```swift
+Task {
+    await Enforce.clearConsent()
+}
+```
+
+Calling this deletes the persisted consent record, notifies every `onConsent(_:)` subscriber with an empty map, and dismisses any visible consent banner or modal.
+
+After clearing:
+- `getConsent()` returns `[:]`
+- `checkConsent(category)` returns `false` for all categories
+- On the next `configure(_:)` call, the SDK finds no stored consent and follows its normal auto-show logic (banner or modal, depending on remote config).
+
 ### Changing Environment at Runtime
 
 If you need to switch environments without rebuilding:

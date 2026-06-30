@@ -83,8 +83,8 @@ struct ConsentStore {
         return Dictionary(uniqueKeysWithValues: keys.map { ($0, all[$0] ?? false) })
     }
     
-    /// Clear all stored consent data (used on expiry or version change).
-    private static func clearAll() {
+    /// Clear all stored consent data (used on expiry, version change, or an explicit `clearConsent()`).
+    static func clearAll() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: dataKey)
         defaults.removeObject(forKey: expiryKey)

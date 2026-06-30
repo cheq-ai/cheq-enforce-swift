@@ -132,4 +132,41 @@ final class ReportingBeaconTests: XCTestCase {
 
         wait(for: [exp], timeout: 2.0)
     }
+
+    // 4) clearConsent() should reset the in-memory cookie accumulator so a
+    //    subsequent beacon only carries the current event's flags, not stale ones.
+    func test_clearConsent_resets_beacon_cookie_flags() async throws {
+        let config = makeConfig(autoShow: false)
+        Enforce.configure(config)
+
+        // Accumulate some consent flags into the in-memory cookie accumulator.
+        await ConsentReporting.send(config: config, type: .consent,
+                                    clientId: "client", version: "1", enforcement: false,
+                                    cookieFlags: ["Analytics": true, "Marketing": true])
+        XCTAssertFalse(Enforce.storedCookieFlags.isEmpty,
+                       "Precondition: flags should be accumulated before clearing")
+
+        // Clear consent — this must wipe the accumulator.
+        await Enforce.clearConsent()
+        XCTAssertTrue(Enforce.storedCookieFlags.isEmpty,
+                      "clearConsent should reset the in-memory cookie-flag accumulator")
+
+        // A subsequent beacon (e.g. banner load) should only carry the new flag.
+        URLProtocolMock.reset()
+        await ConsentReporting.send(config: config, type: .consent,
+                                    clientId: "client", version: "1", enforcement: false,
+                                    cookieFlags: ["BANNER_LOADED": true])
+
+        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/c/b.rnc") == true }
+        let url = try XCTUnwrap(req?.url)
+        let json = try BeaconDecode.decodeJSONPayload(from: url)
+        let cookies = try XCTUnwrap(json["cookies"] as? [String: String])
+
+        XCTAssertEqual(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_BANNER_LOADED"], "1",
+                       "The current event's flag should be present")
+        XCTAssertNil(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_Analytics"],
+                     "Stale consent flags should not survive clearConsent")
+        XCTAssertNil(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_Marketing"],
+                     "Stale consent flags should not survive clearConsent")
+    }
 }

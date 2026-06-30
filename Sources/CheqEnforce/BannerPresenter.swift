@@ -46,6 +46,7 @@ struct BannerPresenter {
                 alert.overrideUserInterfaceStyle = .unspecified
             }
             
+            Enforce.currentBanner = alert
             rootVC.present(alert, animated: true)
         }
         

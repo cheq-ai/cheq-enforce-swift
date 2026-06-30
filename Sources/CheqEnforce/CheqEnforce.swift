@@ -5,7 +5,12 @@ import UIKit
 public class Enforce {
     static internal let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
     private static var storedConfig: Config?
-    private static weak var currentBanner: UIAlertController?
+
+    /// The currently presented consent banner, if any. Tracked so it can be dismissed by `clearConsent()`.
+    static weak var currentBanner: UIAlertController?
+
+    /// The currently presented consent modal, if any. Tracked so it can be dismissed by `clearConsent()`.
+    static weak var currentModal: UIViewController?
     
     /// signature for consent-change callbacks
     public typealias ConsentChangeHandler = ([String: Bool]) -> Void
@@ -197,6 +202,39 @@ public class Enforce {
         Task { await ConsentReporting.send(config: currentConfig, type: .consent, clientId: resp.clientId, version: resp.version, enforcement: resp.enforcement, cookieFlags: reportFlags) }
     }
     
+    /// Remove all stored consent, reverting the user to a "no consent" state.
+    ///
+    /// Intended for flows such as logout, account switch, or an in-app "reset privacy" action.
+    /// In order, this:
+    ///  1. deletes the persisted consent record from storage,
+    ///  2. notifies every ``onConsent(_:)`` subscriber with an empty map (`[:]`),
+    ///  3. dismisses any currently visible consent banner or modal.
+    ///
+    /// After clearing, ``getConsent()`` returns `[:]` and ``checkConsent(_:)`` returns `false`
+    /// for every category. On the next ``configure(_:)`` call the SDK finds no stored consent and
+    /// follows its normal auto-show logic (banner or modal, depending on remote config).
+    public static func clearConsent() async {
+        log.info("Clearing all stored consent.")
+
+        // Remove the persisted consent record from storage.
+        ConsentStore.clearAll()
+
+        // Reset the in-memory cookie-flag accumulator so subsequent reporting
+        // beacons don't carry over consent flags from before the clear.
+        storedCookieFlags.removeAll()
+
+        // Notify onConsent subscribers that consent is now absent.
+        for handler in consentHandlers {
+            handler([:])
+        }
+
+        // Dismiss any currently visible consent banner or modal.
+        await MainActor.run {
+            currentBanner?.dismiss(animated: true)
+            currentModal?.dismiss(animated: true)
+        }
+    }
+
     ///Change the environment string (you must call `configure` first).
     ///
     /// - Parameter environment: the new `environment` value.
