@@ -1,71 +1,59 @@
 import SwiftUI
-import UIKit
 import CheqEnforce
-import os
-
-private let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
 
 struct ContentView: View {
+    @Environment(SampleAppModel.self) private var model
+
     @State private var checkConsentInput: String = ""
     @State private var getConsentInput: String = ""
     @State private var setConsentInput: String = ""
     @State private var environmentInput: String = ""
     @State private var useCustomTheme: Bool = false
     @State private var themeChoice: SampleThemeChoice = .allFields
-    /// The environment currently applied to the SDK. Must be passed through
-    /// when reconfiguring, otherwise configure() would revert an environment
-    /// previously changed via setEnvironment().
-    @State private var currentEnvironment: String = "English"
-
-    /// The selectable sample themes when "Use Custom EnforceTheme" is on.
-    enum SampleThemeChoice: String, CaseIterable, Identifiable {
-        case allFields = "All Fields"
-        case cheq = "Cheq Brand"
-        case defaults = "All Defaults"
-        var id: String { rawValue }
-    }
 
     var body: some View {
         ScrollView {
-        VStack(spacing: 20) { // Adds spacing between elements
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            
-            // Input field for Check Consent
-            TextField("Enter category for Check Consent", text: $checkConsentInput)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding(.horizontal)
-            
-            Button("Check Consent") { checkConsent() }
-            
-            // Input field for Get Consent
-            TextField("Enter category for Get Consent", text: $getConsentInput)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding(.horizontal)
-            
-            Button("Get Consent") { getConsent() }
-            
-            // Set Consent Input Field
-            TextField("Enter consent (e.g., Analytics:true, Marketing:false)", text: $setConsentInput)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding(.horizontal)
-            
-            Button("Set Consent") { setConsent() }
-            
-            // Input field for Set Environment
-            TextField("Enter environment name", text: $environmentInput)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding(.horizontal)
-            
-            Button("Set Environment") { setEnvironment() }
+            VStack(spacing: 16) {
+                consentStateCard
+                actionsCard
+                logCard
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    // MARK: - Consent State card
+
+    private var consentStateCard: some View {
+        Card(title: "Consent State") {
+            if model.consent.isEmpty {
+                Text("No consent stored")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(model.consent.sorted(by: { $0.key < $1.key }), id: \.key) { category, allowed in
+                    HStack {
+                        Text(category)
+                        Spacer()
+                        ConsentBadge(allowed: allowed)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions card
+
+    private var actionsCard: some View {
+        Card(title: "Actions") {
+            Button("Show Banner") { model.showBanner() }
+            Button("Show Modal") { model.showModal() }
 
             // Toggling reconfigures Enforce with/without a sample theme.
-            // Themed → custom bottom-sheet banner; unthemed → system alert banner.
+            // Themed = custom bottom-sheet banner; unthemed = system alert banner.
             Toggle("Use Custom Theme", isOn: $useCustomTheme)
-                .padding(.horizontal)
                 .onChange(of: useCustomTheme) { _, _ in
-                    reconfigure()
+                    model.configure(themed: useCustomTheme, choice: themeChoice)
                 }
 
             if useCustomTheme {
@@ -75,245 +63,124 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .padding(.horizontal)
                 .onChange(of: themeChoice) { _, _ in
-                    reconfigure()
+                    model.configure(themed: useCustomTheme, choice: themeChoice)
                 }
             }
 
-            Button("Show Banner") { showBanner() }
-            Button("Show Modal") { showModal() }
-            Button("Get Configuration") { getConfiguration() }
-            Button("Clear Consent") { clearConsent() }
-                .buttonStyle(ClearButtonStyle())
+            fieldLabel("Environment")
+            TextField("Enter environment name", text: $environmentInput)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Button("Set Environment") { model.setEnvironment(environmentInput) }
+            ResultText(result: model.environmentResult)
 
+            fieldLabel("Check Consent")
+            TextField("Enter category for Check Consent", text: $checkConsentInput)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Button("Check Consent") { model.checkConsent(checkConsentInput) }
+            ResultText(result: model.checkConsentResult)
+
+            fieldLabel("Get Consent")
+            TextField("Enter category (empty for all)", text: $getConsentInput)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Button("Get Consent") { model.getConsent(getConsentInput) }
+            ResultText(result: model.getConsentResult)
+
+            fieldLabel("Set Consent")
+            TextField("Enter consent (e.g., Analytics:true, Marketing:false)", text: $setConsentInput)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Button("Set Consent") { model.setConsent(setConsentInput) }
+            ResultText(result: model.setConsentResult)
+
+            Button("Get Configuration") { model.getConfiguration() }
+            ResultText(result: model.configurationResult)
+
+            Button("Clear Consent") { model.clearConsent() }
+                .buttonStyle(ClearButtonStyle())
         }
         .buttonStyle(CustomButtonStyle())
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Log card
+
+    private var logCard: some View {
+        Card(title: "Log") {
+            if model.logEntries.isEmpty {
+                Text("No activity yet")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(model.logEntries) { entry in
+                    Text("[\(entry.timestamp)] \(entry.message)")
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Reusable views
+
+/// Rounded-rect grouped card with a headline title, matching the React
+/// sample app's layout.
+private struct Card<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
     }
-    
-    // MARK: - Button Actions
-    func checkConsent() {
-        log.info("Check Consent tapped - checking: \(checkConsentInput)")
-        log.info("Consent check result: \(Enforce.checkConsent(checkConsentInput))")
+}
+
+/// Green "Allowed" / red "Denied" capsule badge for one consent category.
+private struct ConsentBadge: View {
+    let allowed: Bool
+
+    var body: some View {
+        Text(allowed ? "Allowed" : "Denied")
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background((allowed ? Color.green : Color.red).opacity(0.15))
+            .foregroundColor(allowed ? .green : .red)
+            .clipShape(Capsule())
     }
+}
 
-    func getConsent() {
-        log.info("Get Consent tapped")
+/// Inline action result rendered under a button: green for success, red
+/// for errors, secondary for informational output.
+private struct ResultText: View {
+    let result: SampleAppModel.ActionResult?
 
-        let trimmed = getConsentInput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let consentData: [String: Bool]
-        if trimmed.isEmpty {
-            consentData = Enforce.getConsent()
-        } else if trimmed.contains(",") {
-            let keys = trimmed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            consentData = Enforce.getConsent(for: keys)
-        } else {
-            consentData = Enforce.getConsent(for: trimmed)
-        }
-
-        log.info("Consent data: \(consentData, privacy: .public)")
-    }
-
-    func setConsent() {
-        log.info("Set Consent tapped - input: \(setConsentInput, privacy: .public)")
-        
-        let consentDict = parseConsentInput(setConsentInput)
-        
-        if !consentDict.isEmpty {
-            Enforce.setConsent(consentDict)
-            log.info("Consent set: \(String(describing: consentDict), privacy: .public)")
-        } else {
-            log.warning("Invalid consent input format.")
+    var body: some View {
+        if let result {
+            Text(result.message)
+                .font(.footnote)
+                .foregroundColor(color)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    func setEnvironment() {
-        log.info("Set Environment tapped - setting: \(environmentInput, privacy: .public)")
-        Task {
-          do {
-            try await Enforce.setEnvironment(environmentInput)
-            currentEnvironment = environmentInput
-          } catch {
-              log.warning("Couldn’t switch environment: \(error)")
-          }
+    private var color: Color {
+        switch result?.style {
+        case .success: return .green
+        case .error:   return .red
+        case .info, .none: return .secondary
         }
-    }
-
-    func showBanner() {
-        log.info("Show Banner tapped")
-        Enforce.showBanner()
-    }
-
-    func showModal() {
-        log.info("Show Modal tapped")
-        Enforce.showModal()
-    }
-
-    func clearConsent() {
-        log.info("Clear Consent tapped")
-        Task {
-            await Enforce.clearConsent()
-        }
-    }
-
-    /// Logs everything getConfiguration() returns, or a warning if the
-    /// remote fetch hasn't completed yet.
-    func getConfiguration() {
-        log.info("Get Configuration tapped")
-
-        guard let configuration = Enforce.getConfiguration() else {
-            log.warning("getConfiguration() returned nil; configure() has not finished fetching yet")
-            return
-        }
-
-        func show(_ value: String?) -> String { value ?? "nil" }
-        func show(_ value: Bool?) -> String { value.map(String.init) ?? "nil" }
-
-        var lines: [String] = ["getConfiguration():"]
-        lines.append("  clientId: \(configuration.clientId)")
-        lines.append("  version: \(configuration.version)")
-        lines.append("  enforcement: \(configuration.enforcement)")
-        lines.append("  enablePrivacyNotice: \(configuration.enablePrivacyNotice)")
-        lines.append("  enableConsentModal: \(configuration.enableConsentModal)")
-
-        let t = configuration.translation
-        lines.append("  translation:")
-        lines.append("    notificationBannerContent: \(show(t.notificationBannerContent))")
-        lines.append("    notificationBannerAllowAll: \(show(t.notificationBannerAllowAll))")
-        lines.append("    notificationBannerDenyAll: \(show(t.notificationBannerDenyAll))")
-        lines.append("    notificationBannerPreferences: \(show(t.notificationBannerPreferences))")
-        lines.append("    consentTitle: \(show(t.consentTitle))")
-        lines.append("    consentDescription: \(show(t.consentDescription))")
-        lines.append("    consentModalAllowAll: \(show(t.consentModalAllowAll))")
-        lines.append("    consentModalDenyAll: \(show(t.consentModalDenyAll))")
-        lines.append("    save: \(show(t.save)), cancel: \(show(t.cancel)), close: \(show(t.close))")
-        if let cookies = t.cookies, !cookies.isEmpty {
-            lines.append("    cookies:")
-            for (key, details) in cookies.sorted(by: { $0.key < $1.key }) {
-                lines.append("      \(key): title=\(show(details.title)), description=\(show(details.description))")
-            }
-        } else {
-            lines.append("    cookies: nil")
-        }
-
-        if let banner = configuration.bannerConfig {
-            lines.append("  bannerConfig: acceptAll=\(show(banner.ensAcceptAll)), rejectAll=\(show(banner.ensRejectAll)), openModal=\(show(banner.ensOpenModal)), closeBanner=\(show(banner.ensCloseBanner))")
-        } else {
-            lines.append("  bannerConfig: nil")
-        }
-
-        if let modal = configuration.consentModalConfig {
-            lines.append("  consentModalConfig: acceptAll=\(show(modal.ensConsentAcceptAll)), rejectAll=\(show(modal.ensConsentRejectAll)), save=\(show(modal.ensSaveModal)), close=\(show(modal.ensCloseModal))")
-        } else {
-            lines.append("  consentModalConfig: nil")
-        }
-
-        log.info("\(lines.joined(separator: "\n"), privacy: .public)")
-    }
-
-    /// The theme for the current picker selection.
-    var selectedTheme: EnforceTheme {
-        switch themeChoice {
-        case .allFields: return Self.sampleThemeJSON   // bundled enforce_theme.json, every field set
-        case .cheq:      return Self.cheqTheme         // cheq.ai brand styling
-        case .defaults:  return EnforceTheme()                // empty theme → all light-mode defaults
-        }
-    }
-
-    /// Reconfigures Enforce with the selected sample theme (or none) so all
-    /// banner styles can be exercised. autoShow is off so the UI only appears
-    /// when Show Banner / Show Modal is tapped.
-    func reconfigure() {
-        log.info("Reconfiguring Enforce (custom theme: \(useCustomTheme), choice: \(themeChoice.rawValue, privacy: .public))")
-        Enforce.configure(Config(
-            "demoretail",
-            publishPath: "mobile_privacy_sdk",
-            environment: currentEnvironment,
-            debug: true,
-            dataRetentionPeriod: 60000,
-            autoShow: false,
-            version: "1",
-            defaultConsent: ["Analytics": true, "Marketing": false, "Functional": true],
-            theme: useCustomTheme ? selectedTheme : nil
-        ))
-    }
-
-    /// EnforceTheme matching the cheq.ai brand: magenta (#FE0072) primary actions,
-    /// deep purple (#34163E) text, light lavender surfaces, Avenir Next
-    /// (iOS's closest match to the brand's Avenir Next LT Pro), pill buttons,
-    /// and the CheqLogo asset.
-    static let cheqTheme = EnforceTheme(
-        banner: EnforceTheme.Banner(
-            logoImage: "CheqLogo",
-            logoAlignment: .left,
-            backgroundColor: "#FFFFFF",
-            separatorColor: "#D7D5E1",
-            overlayColor: "#34163E80",
-            summary: EnforceTheme.Summary(
-                description: EnforceTheme.TextStyle(fontName: "AvenirNext-Regular", fontSize: 15, textAlignment: .left, textColor: "#34163E")
-            ),
-            buttons: EnforceTheme.BannerButtons(
-                acceptAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
-                close: EnforceTheme.ButtonStyle(backgroundColor: "#00000000", textColor: "#FE0072"),
-                global: EnforceTheme.ButtonStyle(backgroundColor: "#EEF1FA", fontName: "AvenirNext-Medium", fontSize: 16, textColor: "#34163E", borderRadius: 22)
-            )
-        ),
-        modal: EnforceTheme.Modal(
-            logoImage: "CheqLogo",
-            logoAlignment: .center,
-            backgroundColor: "#FFFFFF",
-            separatorColor: "#D7D5E1",
-            overlayColor: "#34163E80",
-            summary: EnforceTheme.Summary(
-                title: EnforceTheme.TextStyle(fontName: "AvenirNext-Bold", fontSize: 18, textColor: "#34163E"),
-                description: EnforceTheme.TextStyle(fontName: "AvenirNext-Regular", fontSize: 14, textColor: "#34163E")
-            ),
-            buttons: EnforceTheme.ModalButtons(
-                acceptAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
-                close: EnforceTheme.ButtonStyle(backgroundColor: "#00000000", textColor: "#FE0072"),
-                global: EnforceTheme.ButtonStyle(backgroundColor: "#EEF1FA", fontName: "AvenirNext-Medium", fontSize: 16, textColor: "#34163E", borderRadius: 22)
-            ),
-            categories: EnforceTheme.Categories(
-                toggleOnColor: "#FE0072",
-                toggleOffColor: "#D7D5E1",
-                title: EnforceTheme.TextStyle(fontName: "AvenirNext-DemiBold", fontSize: 16, textColor: "#34163E"),
-                description: EnforceTheme.TextStyle(fontName: "AvenirNext-Regular", fontSize: 13, textColor: "#4C2766")
-            )
-        )
-    )
-
-    /// Same idea as `sampleTheme`, but loaded from the bundled
-    /// `enforce_theme.json` file; the recommended way to supply a theme,
-    /// using the shared cross-SDK JSON shape. Uses deliberately different
-    /// colors (green primary, amber secondaries, red toggles) so it's
-    /// obvious which theme is active.
-    /// Note: a programmatic `logoUIImage` can't come from JSON, so this
-    /// variant has no logo; which also demonstrates omitted-key fallback.
-    static let sampleThemeJSON: EnforceTheme = {
-        do {
-            return try EnforceTheme(bundleFile: "enforce_theme")
-        } catch {
-            log.error("Failed to load bundled theme: \(error, privacy: .public)")
-            return EnforceTheme()
-        }
-    }()
-
-    // Helper function to parse input into [String: Bool]
-    func parseConsentInput(_ input: String) -> [String: Bool] {
-        var result: [String: Bool] = [:]
-        
-        let pairs = input.split(separator: ",")
-        for pair in pairs {
-            let components = pair.split(separator: ":").map { String($0).trimmingCharacters(in: .whitespaces) }
-            if components.count == 2, let value = Bool(components[1]) {
-                result[components[0]] = value
-            }
-        }
-        
-        return result
     }
 }
 
@@ -351,4 +218,5 @@ struct ClearButtonStyle: ButtonStyle {
 
 #Preview {
     ContentView()
+        .environment(SampleAppModel())
 }

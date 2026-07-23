@@ -42,7 +42,9 @@ public class CustomConsentModalViewController: UIViewController {
         self.modalConfig = modalConfig
         self.sections = sections
         self.config = config
-        self.toggleStates = Array(repeating: false, count: sections.count)
+        // Seed the toggles from stored consent so the modal reflects the
+        // user's current choices (categories without stored consent are off).
+        self.toggleStates = sections.map { ConsentStore.get($0.title) }
         self.allowAllTitle = allowAllTitle
         self.denyAllTitle = denyAllTitle
         self.saveTitle = saveTitle
@@ -402,6 +404,7 @@ public class CustomConsentModalViewController: UIViewController {
 
         let toggleSwitch = UISwitch()
         toggleSwitch.tag = index
+        toggleSwitch.isOn = toggleStates[index]
         toggleSwitch.addTarget(self, action: #selector(toggleChanged(_:)), for: .valueChanged)
         toggleSwitch.translatesAutoresizingMaskIntoConstraints = false
         if isThemed {
