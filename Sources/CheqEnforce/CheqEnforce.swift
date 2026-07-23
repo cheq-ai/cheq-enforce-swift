@@ -54,6 +54,12 @@ public class Enforce {
     ///
     /// - Parameter config: your `Config` object (clientName, publishPath, environment, etc.)
     public static func configure(_ config: Config) {
+        // Remember the app-supplied environment so resetEnvironment() can
+        // return to it, then apply a persisted setEnvironment() override
+        // if one is still within its expiration.
+        configuredEnvironment = config.environment
+        let config = applyingStoredEnvironment(config)
+
         //Build environment.json URL from configuration values
         guard let url = TranslationService.buildURL(config: config) else { return }
         log.info("URL to retrieve translations: \(url)")
@@ -247,7 +253,75 @@ public class Enforce {
         }
     }
 
+    /// The environment currently in effect, including a persisted
+    /// ``setEnvironment(_:)`` override applied during ``configure(_:)``.
+    ///
+    /// - Returns: the effective environment, or `nil` if ``configure(_:)``
+    ///   has not been called yet.
+    public static func getEnvironment() -> String? {
+        return storedConfig?.environment
+    }
+
+    /// Discard a persisted ``setEnvironment(_:)`` override and return to the
+    /// environment supplied to ``configure(_:)``, both for the current
+    /// session and future launches.
+    public static func resetEnvironment() {
+        ConsentStore.clearEnvironmentOverride()
+
+        guard let currentConfig = storedConfig else {
+            log.info("resetEnvironment(): no stored config; nothing to reset.")
+            return
+        }
+        guard let original = configuredEnvironment, original != currentConfig.environment else {
+            log.info("resetEnvironment(): already using the configured environment.")
+            return
+        }
+        storedConfig = replacingEnvironment(of: currentConfig, with: original)
+        log.info("resetEnvironment(): environment reverted to configured “\(original, privacy: .public)”.")
+    }
+
+    /// The environment passed to `configure(_:)`, before any stored
+    /// override was applied. Used by `resetEnvironment()`.
+    internal static var configuredEnvironment: String?
+
+    /// Returns the config with a persisted, unexpired `setEnvironment()`
+    /// override applied; otherwise returns the config as-is. The override
+    /// carries its own expiration (snapshotted from the consent expiration
+    /// when it was saved), so it falls back automatically when that period
+    /// ends.
+    internal static func applyingStoredEnvironment(_ config: Config) -> Config {
+        guard let override = ConsentStore.validEnvironmentOverride(),
+              override != config.environment else {
+            return config
+        }
+        log.info("Using stored environment override “\(override, privacy: .public)” from setEnvironment(); reverts to “\(config.environment, privacy: .public)” on expiry or resetEnvironment().")
+        return replacingEnvironment(of: config, with: override)
+    }
+
+    /// Rebuilds a Config with a different environment, all other fields unchanged.
+    private static func replacingEnvironment(of config: Config, with environment: String) -> Config {
+        return Config(
+            config.clientName,
+            publishPath: config.publishPath,
+            environment: environment,
+            debug: config.debug,
+            dataRetentionPeriod: config.dataRetentionPeriod,
+            autoShow: config.autoShow,
+            version: config.version,
+            defaultConsent: config.defaultConsent,
+            appearance: config.appearance,
+            theme: config.theme
+        )
+    }
+
     ///Change the environment string (you must call `configure` first).
+    ///
+    /// The new environment is persisted and overrides the configured one on
+    /// future launches. Its lifetime follows the consent period: each time
+    /// consent is saved, the override's expiration is re-aligned to the new
+    /// consent expiration, and once that period lapses the SDK reverts to
+    /// the configured environment. It is not affected by ``clearConsent()``;
+    /// use ``resetEnvironment()`` to discard it explicitly.
     ///
     /// - Parameter environment: the new `environment` value.
     /// - Throws: `URLError` or `DecodingError` if the JSON at the new URL can’t be fetched/parsed.
@@ -287,8 +361,10 @@ public class Enforce {
             let data = try await TranslationService.fetchJSON(from: url, debug: currentConfig.debug)
             _ = try JSONDecoder().decode(JSONResponse.self, from: data)
             
-            // Successfully fetched. Store new config
+            // Successfully fetched. Store new config and persist the override
+            // so future launches keep this environment (until consent expires).
             storedConfig = updatedConfig
+            ConsentStore.saveEnvironmentOverride(environment)
             log.info("Environment updated to: \(environment, privacy: .public)")
         } catch {
             // fetch or decode failed; roll back

@@ -73,6 +73,9 @@ struct ContentView: View {
                 .textFieldStyle(RoundedBorderTextFieldStyle())
             Button("Set Environment") { model.setEnvironment(environmentInput) }
             ResultText(result: model.environmentResult)
+            Button("Get Environment") { model.getEnvironment() }
+            ResultText(result: model.getEnvironmentResult)
+            Button("Reset Environment") { model.resetEnvironment() }
 
             fieldLabel("Check Consent")
             TextField("Enter category for Check Consent", text: $checkConsentInput)

@@ -42,6 +42,7 @@ final class SampleAppModel {
 
     // Inline results shown under each action's button.
     var environmentResult: ActionResult?
+    var getEnvironmentResult: ActionResult?
     var checkConsentResult: ActionResult?
     var getConsentResult: ActionResult?
     var setConsentResult: ActionResult?
@@ -124,6 +125,32 @@ final class SampleAppModel {
             defaultConsent: ["Analytics": true, "Marketing": false, "Functional": true],
             theme: themed ? Self.theme(for: choice) : nil
         ))
+
+        // The SDK may apply a persisted setEnvironment() override during
+        // configure; sync so the sample app reflects the effective value.
+        if let effective = Enforce.getEnvironment(), effective != currentEnvironment {
+            currentEnvironment = effective
+            log("configure(): stored environment override in effect: \"\(effective)\"")
+        }
+    }
+
+    func getEnvironment() {
+        let message: String
+        if let environment = Enforce.getEnvironment() {
+            message = "getEnvironment(): \"\(environment)\""
+        } else {
+            message = "getEnvironment(): nil (configure() not called yet)"
+        }
+        getEnvironmentResult = ActionResult(message: message, style: .info)
+        log(message)
+    }
+
+    func resetEnvironment() {
+        Enforce.resetEnvironment()
+        currentEnvironment = Enforce.getEnvironment() ?? currentEnvironment
+        let message = "resetEnvironment(): environment is now \"\(currentEnvironment)\""
+        environmentResult = ActionResult(message: message, style: .success)
+        log(message)
     }
 
     func setEnvironment(_ name: String) {

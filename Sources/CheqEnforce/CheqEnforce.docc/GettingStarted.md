@@ -99,9 +99,17 @@ Task {
   }
 }
 ```
-This updates the stored Config.environment and will affect subsequent UI fetches.
+This updates the stored Config.environment and will affect subsequent UI fetches. The new environment is also persisted: on future launches it overrides the environment passed to `configure(_:)`. Its lifetime follows the consent period: each time consent is saved, the override's expiration is re-aligned to the new consent expiration, and once that period lapses the SDK reverts to the configured environment. It is not affected by `clearConsent()`.
 
-> **Note:** On failure, the environment is reverted to its previous value.
+Use `getEnvironment()` to read the environment currently in effect (including a persisted override), and `resetEnvironment()` to discard the override and return to the configured environment immediately:
+
+```swift
+let current = Enforce.getEnvironment()   // nil before configure() is called
+
+Enforce.resetEnvironment()               // back to the configure() environment
+```
+
+> **Note:** On failure, the environment is reverted to its previous value and nothing is persisted.
 
 ### Manual UI Control
 If you want to show the banner or modal on demand (e.g., from a settings screen):
