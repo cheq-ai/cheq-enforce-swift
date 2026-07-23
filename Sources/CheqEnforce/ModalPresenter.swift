@@ -56,19 +56,39 @@ struct ModalPresenter {
             let cancelTitle    = translation.cancel ?? ""
             
             // Instantiate and present
-            let modal = CustomConsentModalViewController(
-                title: consentTitle,
-                description: consentDescription,
-                modalConfig: consentModalConfig,
-                sections: sections,
-                config: config,
-                allowAllTitle: allowAllTitle,
-                denyAllTitle: denyAllTitle,
-                saveTitle: saveTitle,
-                cancelTitle: cancelTitle
-            )
-            Enforce.currentModal = modal
-            rootVC.present(modal, animated: true, completion: nil)
+            let present: (UIImage?) -> Void = { logo in
+                let modal = CustomConsentModalViewController(
+                    title: consentTitle,
+                    description: consentDescription,
+                    modalConfig: consentModalConfig,
+                    sections: sections,
+                    config: config,
+                    allowAllTitle: allowAllTitle,
+                    denyAllTitle: denyAllTitle,
+                    saveTitle: saveTitle,
+                    cancelTitle: cancelTitle,
+                    logo: logo
+                )
+                Enforce.currentModal = modal
+                rootVC.present(modal, animated: true, completion: nil)
+            }
+
+            if let theme = config.theme {
+                // Themed modal: resolve the optional logo first. Themed UI is light-mode based.
+                if config.appearance != .default {
+                    log.info("Theme provided; ignoring 'appearance' setting; themed UI uses light mode.")
+                }
+                Task {
+                    let logo = await ThemeLogoLoader.load(
+                        uiImage: theme.modal?.logoUIImage,
+                        assetName: theme.modal?.logoImage,
+                        urlString: theme.modal?.logoURL
+                    )
+                    await MainActor.run { present(logo) }
+                }
+            } else {
+                present(nil)
+            }
         }
         
         if delay > 0 {

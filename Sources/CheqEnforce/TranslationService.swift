@@ -34,7 +34,7 @@ struct TranslationService {
         // start with the base URL
         guard var url = URL(string: baseURL) else { return nil }
         
-        // append each path component — handles percent-escaping
+        // append each path component; handles percent-escaping
         url.appendPathComponent("privacy")
         url.appendPathComponent("environments")
         url.appendPathComponent(client)

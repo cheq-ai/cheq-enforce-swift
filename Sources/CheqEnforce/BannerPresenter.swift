@@ -29,6 +29,37 @@ struct BannerPresenter {
                 return
             }
             
+            // Beacon on load (fires once, for both banner styles)
+            report(flags: ["BANNER_LOADED": true], config: config)
+
+            if let theme = config.theme {
+                // Themed bottom-sheet banner. Themed UI is light-mode based.
+                if config.appearance != .default {
+                    log.info("Theme provided; ignoring 'appearance' setting; themed UI uses light mode.")
+                }
+                Task {
+                    let logo = await ThemeLogoLoader.load(
+                        uiImage: theme.banner?.logoUIImage,
+                        assetName: theme.banner?.logoImage,
+                        urlString: theme.banner?.logoURL
+                    )
+                    await MainActor.run {
+                        let banner = CustomBannerViewController(
+                            translation: translation,
+                            bannerConfig: bannerConfig,
+                            consentModalConfig: consentModalConfig,
+                            config: config,
+                            logo: logo
+                        )
+                        Enforce.currentBanner = banner
+                        // No system transition; the banner animates its own
+                        // overlay fade + slide-up in viewDidAppear.
+                        rootVC.present(banner, animated: false)
+                    }
+                }
+                return
+            }
+
             let alert = makeAlert(
                 translation: translation,
                 bannerConfig: bannerConfig,
@@ -36,7 +67,7 @@ struct BannerPresenter {
                 config: config,
                 rootVC: rootVC
             )
-            
+
             switch config.appearance {
             case .light:
                 alert.overrideUserInterfaceStyle = .light
@@ -45,7 +76,7 @@ struct BannerPresenter {
             case .default:
                 alert.overrideUserInterfaceStyle = .unspecified
             }
-            
+
             Enforce.currentBanner = alert
             rootVC.present(alert, animated: true)
         }
@@ -71,13 +102,10 @@ struct BannerPresenter {
             message: translation.notificationBannerContent,
             preferredStyle: .alert
         )
-        
-        // Beacon on load
-        report(flags: ["BANNER_LOADED": true], config: config)
-        
+
         // Precompute all-true and all-false consent maps
-        let allTrueFlags  = translation.cookies?.mapValues { _ in true }  ?? [:]
-        let allFalseFlags = translation.cookies?.mapValues { _ in false } ?? [:]
+        let allTrueFlags  = acceptAllFlags(translation)
+        let allFalseFlags = rejectAllFlags(translation)
         
         // Accept All
         if bannerConfig.ensAcceptAll?.show == true {
@@ -121,22 +149,36 @@ struct BannerPresenter {
         
         // Close Banner
         if bannerConfig.ensCloseBanner?.show == true {
-            // If defaultConsent exists, use that; otherwise fallback to all-false
-            let baseFlags = (config.defaultConsent?.isEmpty == false) ? (config.defaultConsent!) : allFalseFlags
             addAction(
                 to: alert,
                 title: translation.close ?? "",
                 style: .cancel,
-                flags: baseFlags,
+                flags: closeFlags(translation, config: config),
                 config: config
             )
         }
-        
+
         return alert
     }
-    
+
     // MARK: - Helpers
-    
+
+    /// Consent map with every cookie category set to `true`.
+    static func acceptAllFlags(_ translation: Translation) -> [String: Bool] {
+        translation.cookies?.mapValues { _ in true } ?? [:]
+    }
+
+    /// Consent map with every cookie category set to `false`.
+    static func rejectAllFlags(_ translation: Translation) -> [String: Bool] {
+        translation.cookies?.mapValues { _ in false } ?? [:]
+    }
+
+    /// Consent map for the Close action: `defaultConsent` if provided,
+    /// otherwise all-false.
+    static func closeFlags(_ translation: Translation, config: Config) -> [String: Bool] {
+        (config.defaultConsent?.isEmpty == false) ? config.defaultConsent! : rejectAllFlags(translation)
+    }
+
     /// Adds a button to the alert that saves flags and sends a beacon including "BANNER_VIEWED".
     private static func addAction(
         to alert: UIAlertController,
@@ -153,7 +195,7 @@ struct BannerPresenter {
     }
     
     /// Encodes and sends the consent-reporting beacon for the given flags.
-    private static func report(flags: [String: Bool], config: Config) {
+    static func report(flags: [String: Bool], config: Config) {
         guard let resp = Enforce.lastResponse else { return }
         Task { await ConsentReporting.send(config: config, type: .consent, clientId: resp.clientId, version: resp.version, enforcement: resp.enforcement, cookieFlags: flags) }
     }

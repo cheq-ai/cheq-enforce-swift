@@ -6,8 +6,9 @@ public class Enforce {
     static internal let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
     private static var storedConfig: Config?
 
-    /// The currently presented consent banner, if any. Tracked so it can be dismissed by `clearConsent()`.
-    static weak var currentBanner: UIAlertController?
+    /// The currently presented consent banner (alert or themed bottom sheet),
+    /// if any. Tracked so it can be dismissed by `clearConsent()`.
+    static weak var currentBanner: UIViewController?
 
     /// The currently presented consent modal, if any. Tracked so it can be dismissed by `clearConsent()`.
     static weak var currentModal: UIViewController?
@@ -168,6 +169,17 @@ public class Enforce {
         return ConsentStore.get(keys)
     }
     
+    /// Retrieve the remote consent configuration (translations, banner &
+    /// modal button configuration) fetched from the remote JSON file, so a
+    /// customer can implement their own consent experience.
+    ///
+    /// - Returns: the configuration, or `nil` if ``configure(_:)`` has not
+    ///   yet completed its asynchronous fetch.
+    public static func getConfiguration() -> EnforceConfiguration? {
+        guard let resp = lastResponse else { return nil }
+        return EnforceConfiguration(from: resp)
+    }
+
     /// Overwrite (or merge) one or more consent categories.
     ///
     /// - Parameter consent: a `[String:Bool]` of the categories & values to set.
@@ -255,7 +267,8 @@ public class Enforce {
             autoShow: currentConfig.autoShow,
             version: currentConfig.version,
             defaultConsent: currentConfig.defaultConsent,
-            appearance: currentConfig.appearance
+            appearance: currentConfig.appearance,
+            theme: currentConfig.theme
         )
         
         guard let resp = Enforce.lastResponse else { return }
@@ -270,7 +283,7 @@ public class Enforce {
         }
         
         do {
-            // try to fetch & parse the JSON — this validates that the env really exists
+            // try to fetch & parse the JSON; this validates that the env really exists
             let data = try await TranslationService.fetchJSON(from: url, debug: currentConfig.debug)
             _ = try JSONDecoder().decode(JSONResponse.self, from: data)
             
@@ -278,8 +291,8 @@ public class Enforce {
             storedConfig = updatedConfig
             log.info("Environment updated to: \(environment, privacy: .public)")
         } catch {
-            // fetch or decode failed — roll back
-            log.error("Environment ‘\(environment)’ isn’t valid, keeping previous “\(currentConfig.environment)” — error: \(error.localizedDescription, privacy: .public)")
+            // fetch or decode failed; roll back
+            log.error("Environment ‘\(environment)’ isn’t valid, keeping previous “\(currentConfig.environment)”; error: \(error.localizedDescription, privacy: .public)")
             Task {
                 _ = await ErrorReporting.sendError(msg: "Environment ‘\(environment)’ isn’t valid, keeping previous", fn: #function, clientId: resp.clientId, config: currentConfig)
             }

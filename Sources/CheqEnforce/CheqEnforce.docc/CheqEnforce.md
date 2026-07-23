@@ -6,3 +6,4 @@ Cheq Swift Enforce
 
 - <doc:GettingStarted>
 - <doc:ImplementationGuide>
+- <doc:ThemeReference>

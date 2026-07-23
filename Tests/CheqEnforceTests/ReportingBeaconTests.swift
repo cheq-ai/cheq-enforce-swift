@@ -146,7 +146,7 @@ final class ReportingBeaconTests: XCTestCase {
         XCTAssertFalse(Enforce.storedCookieFlags.isEmpty,
                        "Precondition: flags should be accumulated before clearing")
 
-        // Clear consent — this must wipe the accumulator.
+        // Clear consent; this must wipe the accumulator.
         await Enforce.clearConsent()
         XCTAssertTrue(Enforce.storedCookieFlags.isEmpty,
                       "clearConsent should reset the in-memory cookie-flag accumulator")
