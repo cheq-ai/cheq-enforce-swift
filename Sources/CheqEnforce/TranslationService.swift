@@ -41,8 +41,11 @@ struct TranslationService {
         url.appendPathComponent(path)
         url.appendPathComponent(env)
         url.appendPathComponent("environment.json")
-        
-        return url
+
+        // Tag the request with the SDK utm parameters
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        comps.queryItems = Info.utmQueryItems
+        return comps.url ?? url
     }
     
     /// Fetches JSON from a given URL using async/await.

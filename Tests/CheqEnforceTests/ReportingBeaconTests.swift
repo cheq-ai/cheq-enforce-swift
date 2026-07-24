@@ -133,6 +133,44 @@ final class ReportingBeaconTests: XCTestCase {
         wait(for: [exp], timeout: 2.0)
     }
 
+    // Beacon URLs must carry the SDK utm parameters, and the payload's
+    // "gateway" field must use the (gateway-version)-(platform)-(sdk-version) format.
+    func test_beacon_has_utm_params_and_gateway_format() async throws {
+        let config = makeConfig(autoShow: false)
+
+        await ConsentReporting.send(config: config, type: .consent,
+                                    clientId: "client", version: "3", enforcement: false,
+                                    cookieFlags: ["Analytics": true])
+
+        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/c/b.rnc") == true }
+        let url = try XCTUnwrap(req?.url)
+
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(items.first { $0.name == "utm_platform" }?.value, "ios")
+        XCTAssertEqual(items.first { $0.name == "utm_sdk_version" }?.value, Info.version)
+
+        let json = try BeaconDecode.decodeJSONPayload(from: url)
+        XCTAssertEqual(json["gateway"] as? String, "3-ios-\(Info.version)")
+    }
+
+    // Same checks for the billing beacon path.
+    func test_billing_beacon_has_utm_params_and_gateway_format() async throws {
+        let config = makeConfig(autoShow: false)
+
+        await ConsentReporting.send(config: config, type: .billing,
+                                    clientId: "client", version: "3", enforcement: true)
+
+        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/b/b.rnc") == true }
+        let url = try XCTUnwrap(req?.url)
+
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(items.first { $0.name == "utm_platform" }?.value, "ios")
+        XCTAssertEqual(items.first { $0.name == "utm_sdk_version" }?.value, Info.version)
+
+        let json = try BeaconDecode.decodeJSONPayload(from: url)
+        XCTAssertEqual(json["gateway"] as? String, "3-ios-\(Info.version)")
+    }
+
     // 4) clearConsent() should reset the in-memory cookie accumulator so a
     //    subsequent beacon only carries the current event's flags, not stale ones.
     func test_clearConsent_resets_beacon_cookie_flags() async throws {

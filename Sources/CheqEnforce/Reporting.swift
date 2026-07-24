@@ -93,7 +93,7 @@ struct ConsentReporting {
             )
             return EnforceBeacon(
                 version: "1.0.0",
-                gateway: version,
+                gateway: Info.gateway(version),
                 clientId: clientId,
                 clientName: nil,
                 publishPath: config.publishPath,
@@ -130,7 +130,7 @@ struct ConsentReporting {
             let modeString = enforcement ? "whitelist" : "blacklist"
             return EnforceBeacon(
                 version: "1.0.0",
-                gateway: version,
+                gateway: Info.gateway(version),
                 clientId: clientId,
                 clientName: config.clientName,
                 publishPath: config.publishPath,
@@ -206,9 +206,8 @@ struct ConsentReporting {
             URLQueryItem(name: "n", value: "\(n)"),
             URLQueryItem(name: "c", value: clientId),
             URLQueryItem(name: "i", value: instanceId),
-            URLQueryItem(name: "p", value: config.publishPath),
-            URLQueryItem(name: "utm_platform", value: "ios_mobile_sdk"),
-            URLQueryItem(name: "utm_sdk_version", value: "1.0.0"),
+            URLQueryItem(name: "p", value: config.publishPath)
+        ] + Info.utmQueryItems + [
             URLQueryItem(name: "s", value: "\(uncompressedLength)"),
             URLQueryItem(name: "d", value: payload)
         ]

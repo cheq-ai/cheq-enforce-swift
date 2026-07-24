@@ -18,7 +18,7 @@ final class TranslationServiceTests: XCTestCase {
 
         XCTAssertEqual(
           url.absoluteString,
-          "https://nexus.ensighten.com/privacy/environments/myClient/myPath/myEnv/environment.json"
+          "https://nexus.ensighten.com/privacy/environments/myClient/myPath/myEnv/environment.json?utm_platform=ios&utm_sdk_version=\(Info.version)"
         )
     }
 
@@ -36,7 +36,7 @@ final class TranslationServiceTests: XCTestCase {
 
         XCTAssertEqual(
           url.absoluteString,
-          "https://nexus-test.ensighten.com/privacy/environments/myClient/myPath/myEnv/environment.json"
+          "https://nexus-test.ensighten.com/privacy/environments/myClient/myPath/myEnv/environment.json?utm_platform=ios&utm_sdk_version=\(Info.version)"
         )
     }
   
@@ -58,7 +58,8 @@ final class TranslationServiceTests: XCTestCase {
         let expectedEnv    = "en%20vir/on"
         let expected = """
           https://nexus.ensighten.com/privacy/environments/\
-          \(expectedClient)/\(expectedPath)/\(expectedEnv)/environment.json
+          \(expectedClient)/\(expectedPath)/\(expectedEnv)/environment.json\
+          ?utm_platform=ios&utm_sdk_version=\(Info.version)
           """
 
         XCTAssertEqual(url.absoluteString, expected)
