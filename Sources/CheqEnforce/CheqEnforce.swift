@@ -54,6 +54,25 @@ public class Enforce {
     ///
     /// - Parameter config: your `Config` object (clientName, publishPath, environment, etc.)
     public static func configure(_ config: Config) {
+        // Session boundary: validate stored consent once (expiry + version),
+        // synchronously, before anything reads it. In-session reads never
+        // re-evaluate expiry, so consent valid now stays live until the
+        // next configure().
+        let validConsentAtLaunch = ConsentStore.loadValid(currentVersion: config.version)
+
+        // Restore the beacon cookie-flag accumulator (categories plus
+        // interaction flags) persisted alongside consent, so beacons sent
+        // this session carry the full consent state. loadValid cleared it
+        // if the consent record lapsed. Categories from the validated
+        // consent are merged in as a fallback for records stored before
+        // flag persistence existed.
+        storedCookieFlags = ConsentStore.cookieFlags()
+        if let saved = validConsentAtLaunch {
+            for (key, value) in saved where storedCookieFlags[key] == nil {
+                storedCookieFlags[key] = value
+            }
+        }
+
         // Remember the app-supplied environment so resetEnvironment() can
         // return to it, then apply a persisted setEnvironment() override
         // if one is still within its expiration.
@@ -87,16 +106,12 @@ public class Enforce {
                     await ConsentReporting.send(config: config, type: .billing, clientId: resp.clientId, version: resp.version, enforcement: resp.enforcement)
                 }
                 
-                //If consent is found already (same version and within date), trigger onConsent and do nothing further
-                if let saved = ConsentStore.loadValid(currentVersion: config.version) {
+                //If consent was found at the session boundary, do nothing further.
+                //(Uses the result of configure()'s synchronous validation; expiry is not
+                //re-evaluated. The onConsent handlers already fired synchronously in
+                //configure() with this validated consent, so no re-fire here.)
+                if let saved = validConsentAtLaunch {
                     log.info("Saved consent found: \(saved). No need to show the banner.")
-                    
-                    //Trigger consent callbacks
-                    let latest = getConsent()
-                    for handler in consentHandlers {
-                        handler(latest)
-                    }
-                    
                     return
                 }
                 

@@ -281,7 +281,13 @@ public class CustomBannerViewController: UIViewController {
 
     @objc private func closeTapped() {
         log.info("Close selected")
-        setConsentAndDismiss(BannerPresenter.closeFlags(translation, config: config))
+        if let flags = BannerPresenter.closeFlags(translation, config: config) {
+            setConsentAndDismiss(flags)
+        } else {
+            // Consent already stored: keep it and simply dismiss
+            BannerPresenter.report(flags: ["BANNER_VIEWED": true], config: config)
+            animateOutAndDismiss()
+        }
     }
 
     private func setConsentAndDismiss(_ flags: [String: Bool]) {

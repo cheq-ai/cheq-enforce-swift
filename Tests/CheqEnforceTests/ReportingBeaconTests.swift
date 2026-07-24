@@ -13,6 +13,8 @@ final class ReportingBeaconTests: XCTestCase {
         UserDefaults.standard.removePersistentDomain(
             forName: Bundle.main.bundleIdentifier ?? ""
         )
+        Enforce.storedCookieFlags = [:]
+        ConsentStore.hasValidatedExpiry = false
     }
 
     override func tearDown() {
@@ -58,7 +60,12 @@ final class ReportingBeaconTests: XCTestCase {
 
             // Make a few focused assertions about the payload
             XCTAssertEqual(json["publishPath"] as? String, "mobile_privacy_sdk")
-            XCTAssertEqual(json["mode"] as? String, "observe")
+            // The mode reflects the remote environment.json's `enforcement`
+            // flag (this test's environment fetch hits the real network),
+            // so assert validity rather than a server-controlled value.
+            let mode = json["mode"] as? String
+            XCTAssertTrue(mode == "enforce" || mode == "observe",
+                          "Billing beacon mode must be 'enforce' or 'observe', got \(mode ?? "nil")")
             // requests array present, etc.
             XCTAssertNotNil(json["requests"])
         }
@@ -171,6 +178,62 @@ final class ReportingBeaconTests: XCTestCase {
         XCTAssertEqual(json["gateway"] as? String, "3-ios-\(Info.version)")
     }
 
+    // The cookie-flag accumulator persists across sessions while consent is
+    // valid: after a "relaunch", configure() restores it and the billing
+    // beacon carries the full consent state with raw (unprefixed) keys.
+    func test_billing_beacon_carries_persisted_consent_state_after_relaunch() async throws {
+        // Session 1: consent given, banner loaded/viewed
+        ConsentStore.save(["Analytics": true, "Marketing": true, "Functional": true],
+                          version: "1", expirationMilliseconds: 60_000)
+        ConsentStore.saveCookieFlags(["Analytics": true, "Marketing": true, "Functional": true,
+                                      "BANNER_LOADED": true, "BANNER_VIEWED": true])
+
+        // Simulate a relaunch: fresh in-memory state, new session
+        Enforce.storedCookieFlags = [:]
+        ConsentStore.hasValidatedExpiry = false
+        Enforce.configure(makeConfig(autoShow: false))
+
+        URLProtocolMock.reset()
+        await ConsentReporting.send(config: makeConfig(autoShow: false), type: .billing,
+                                    clientId: "client", version: "1", enforcement: false)
+
+        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/b/b.rnc") == true }
+        let url = try XCTUnwrap(req?.url)
+        let json = try BeaconDecode.decodeJSONPayload(from: url)
+        let cookies = try XCTUnwrap(json["cookies"] as? [String: String])
+
+        XCTAssertEqual(cookies, ["Analytics": "1", "Marketing": "1", "Functional": "1",
+                                 "BANNER_LOADED": "1", "BANNER_VIEWED": "1"])
+    }
+
+    // Consent beacons after a relaunch must also carry the restored flags
+    // (prefixed keys), merged with the new event's flags.
+    func test_consent_beacon_after_relaunch_includes_persisted_flags() async throws {
+        ConsentStore.save(["Analytics": true], version: "1", expirationMilliseconds: 60_000)
+        ConsentStore.saveCookieFlags(["Analytics": true, "BANNER_VIEWED": true])
+
+        Enforce.storedCookieFlags = [:]
+        ConsentStore.hasValidatedExpiry = false
+        Enforce.configure(makeConfig(autoShow: false))
+
+        URLProtocolMock.reset()
+        await ConsentReporting.send(config: makeConfig(autoShow: false), type: .consent,
+                                    clientId: "client", version: "1", enforcement: false,
+                                    cookieFlags: ["MODAL_LOADED": true])
+
+        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/c/b.rnc") == true }
+        let url = try XCTUnwrap(req?.url)
+        let json = try BeaconDecode.decodeJSONPayload(from: url)
+        let cookies = try XCTUnwrap(json["cookies"] as? [String: String])
+
+        XCTAssertEqual(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_Analytics"], "1",
+                       "Persisted consent category must survive the relaunch")
+        XCTAssertEqual(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_BANNER_VIEWED"], "1",
+                       "Persisted interaction flag must survive the relaunch")
+        XCTAssertEqual(cookies["DEMORETAIL_ENSIGHTEN_PRIVACY_MODAL_LOADED"], "1",
+                       "The new event's flag must be merged in")
+    }
+
     // 4) clearConsent() should reset the in-memory cookie accumulator so a
     //    subsequent beacon only carries the current event's flags, not stale ones.
     func test_clearConsent_resets_beacon_cookie_flags() async throws {
@@ -184,10 +247,12 @@ final class ReportingBeaconTests: XCTestCase {
         XCTAssertFalse(Enforce.storedCookieFlags.isEmpty,
                        "Precondition: flags should be accumulated before clearing")
 
-        // Clear consent; this must wipe the accumulator.
+        // Clear consent; this must wipe the accumulator, in memory and persisted.
         await Enforce.clearConsent()
         XCTAssertTrue(Enforce.storedCookieFlags.isEmpty,
                       "clearConsent should reset the in-memory cookie-flag accumulator")
+        XCTAssertTrue(ConsentStore.cookieFlags().isEmpty,
+                      "clearConsent should remove the persisted cookie flags")
 
         // A subsequent beacon (e.g. banner load) should only carry the new flag.
         URLProtocolMock.reset()

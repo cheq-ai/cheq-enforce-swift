@@ -34,6 +34,8 @@ if hasAnalytics {
 
 ### Retrieving Stored Consent
 
+> **Note:** Consent expiration is evaluated at the session boundary — when `configure(_:)` runs (or at the first consent read, if that happens earlier). Consent that is valid at startup remains available for the whole session even if its expiration passes mid-session; it is removed at the next launch.
+
 All categories
 
 ```swift

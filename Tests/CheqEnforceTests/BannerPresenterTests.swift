@@ -7,6 +7,17 @@ import XCTest
 /// bugs rather than cosmetic ones.
 final class BannerPresenterTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        ConsentStore.clearAll()
+        ConsentStore.hasValidatedExpiry = false
+    }
+
+    override func tearDown() {
+        ConsentStore.clearAll()
+        super.tearDown()
+    }
+
     // MARK: - Helpers
 
     private func makeTranslation(cookies: [String: CookieDetails]?) -> Translation {
@@ -112,5 +123,15 @@ final class BannerPresenterTests: XCTestCase {
         let flags = BannerPresenter.closeFlags(translation, config: config)
 
         XCTAssertEqual(flags, ["Analytics": true])
+    }
+
+    func testCloseFlagsNilWhenConsentAlreadyStored() {
+        // With stored consent, Close must keep it (nil = dismiss only),
+        // not overwrite it with defaultConsent.
+        ConsentStore.save(["Analytics": true, "Marketing": true], version: "1", expirationMilliseconds: 60_000)
+        let translation = makeTranslation(cookies: threeCategories)
+        let config = makeConfig(defaultConsent: ["Analytics": false])
+
+        XCTAssertNil(BannerPresenter.closeFlags(translation, config: config))
     }
 }

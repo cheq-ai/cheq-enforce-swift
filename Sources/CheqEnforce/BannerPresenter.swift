@@ -147,15 +147,19 @@ struct BannerPresenter {
             alert.addAction(action)
         }
         
-        // Close Banner
+        // Close Banner: the flags are resolved when the button is tapped so
+        // consent given via other buttons in the meantime is respected.
         if bannerConfig.ensCloseBanner?.show == true {
-            addAction(
-                to: alert,
-                title: translation.close ?? "",
-                style: .cancel,
-                flags: closeFlags(translation, config: config),
-                config: config
-            )
+            let action = UIAlertAction(title: translation.close ?? "", style: .cancel) { _ in
+                log.info("Close selected")
+                if let flags = closeFlags(translation, config: config) {
+                    Enforce.setConsent(flags, beaconExtras: ["BANNER_VIEWED": true])
+                } else {
+                    // Consent already stored: keep it and simply dismiss
+                    report(flags: ["BANNER_VIEWED": true], config: config)
+                }
+            }
+            alert.addAction(action)
         }
 
         return alert
@@ -173,10 +177,13 @@ struct BannerPresenter {
         translation.cookies?.mapValues { _ in false } ?? [:]
     }
 
-    /// Consent map for the Close action: `defaultConsent` if provided,
+    /// Consent map for the Close action, or nil when consent is already
+    /// stored; Close then keeps the existing consent and simply dismisses.
+    /// With no stored consent it records `defaultConsent` if provided,
     /// otherwise all-false.
-    static func closeFlags(_ translation: Translation, config: Config) -> [String: Bool] {
-        (config.defaultConsent?.isEmpty == false) ? config.defaultConsent! : rejectAllFlags(translation)
+    static func closeFlags(_ translation: Translation, config: Config) -> [String: Bool]? {
+        guard ConsentStore.getAll().isEmpty else { return nil }
+        return (config.defaultConsent?.isEmpty == false) ? config.defaultConsent! : rejectAllFlags(translation)
     }
 
     /// Adds a button to the alert that saves flags and sends a beacon including "BANNER_VIEWED".

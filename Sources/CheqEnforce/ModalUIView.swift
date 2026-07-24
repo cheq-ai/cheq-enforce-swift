@@ -475,7 +475,13 @@ public class CustomConsentModalViewController: UIViewController {
     }
     
     @objc private func dismissModal() {
-        
+        // Consent already stored: keep it and simply close
+        guard ConsentStore.getAll().isEmpty else {
+            BannerPresenter.report(flags: ["MODAL_VIEWED": true], config: config)
+            dismiss(animated: true, completion: nil)
+            return
+        }
+
         //If default consent provided in configuration, else set all to false
         if let defaultConsent = config.defaultConsent,
            defaultConsent.values.allSatisfy({ $0 == false || $0 == true }) {

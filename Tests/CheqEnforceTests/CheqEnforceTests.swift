@@ -44,6 +44,51 @@ final class EnforceTests: XCTestCase {
     XCTAssertFalse(Enforce.checkConsent("Nonexistent"), "Missing keys must default to false")
   }
 
+  func testExpiredConsentIsNotReturnedByFirstReadOfSession() {
+    ConsentStore.save(["Analytics": true], version: "1", expirationMilliseconds: -1_000)
+    ConsentStore.hasValidatedExpiry = false   // simulate a fresh session
+
+    XCTAssertTrue(Enforce.getConsent().isEmpty,
+                  "The first read of a session must not return expired consent")
+    XCTAssertFalse(Enforce.checkConsent("Analytics"),
+                   "checkConsent() must not honor consent that expired before the session")
+  }
+
+  func testConsentDoesNotExpireMidSession() {
+    // Consent that was valid at the session boundary stays live even after
+    // its timestamp passes; reads never re-evaluate expiry mid-session.
+    ConsentStore.save(["Analytics": true], version: "1", expirationMilliseconds: -1_000)
+    ConsentStore.hasValidatedExpiry = true    // expiry already evaluated this session
+
+    XCTAssertEqual(Enforce.getConsent(), ["Analytics": true],
+                   "Consent must not vanish mid-session when its expiry passes")
+    XCTAssertTrue(Enforce.checkConsent("Analytics"))
+  }
+
+  func testConfigureRevalidatesExpiredConsent() {
+    // configure() is the session boundary: it prunes an expired record
+    // synchronously, so reads immediately after it are already clean.
+    ConsentStore.save(["Analytics": true], version: "1", expirationMilliseconds: -1_000)
+    ConsentStore.hasValidatedExpiry = true    // stale state from a previous session
+
+    Enforce.configure(Config("testClient", publishPath: "testPath", environment: "testEnv", autoShow: false))
+
+    XCTAssertTrue(Enforce.getConsent().isEmpty,
+                  "configure() must prune expired consent before any read")
+  }
+
+  func testConsentSaveDoesNotResurrectExpiredCategories() {
+    // A record that lapsed before the session must not leak its categories
+    // into a fresh save made after the session's expiry prune.
+    ConsentStore.save(["Analytics": true, "Marketing": true], version: "1", expirationMilliseconds: -1_000)
+    ConsentStore.hasValidatedExpiry = false   // fresh session; first access prunes
+
+    ConsentStore.save(["Functional": true], version: "1", expirationMilliseconds: 60_000)
+
+    XCTAssertEqual(Enforce.getConsent(), ["Functional": true],
+                   "Pre-session expired categories must not be merged into new consent")
+  }
+
   func testSetConsentAndCheck() {
     // set one category to true
     Enforce.setConsent(["Analytics": true])

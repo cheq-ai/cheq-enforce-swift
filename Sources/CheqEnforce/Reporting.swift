@@ -91,6 +91,11 @@ struct ConsentReporting {
                 list: [],
                 id: timestamp
             )
+            // Billing carries the accumulated consent state with raw keys
+            // (category names and interaction flags, no client-name prefix)
+            let cookies = Dictionary(uniqueKeysWithValues:
+                Enforce.storedCookieFlags.map { flag, enabled in (flag, enabled ? "1" : "0") }
+            )
             return EnforceBeacon(
                 version: "1.0.0",
                 gateway: Info.gateway(version),
@@ -100,7 +105,7 @@ struct ConsentReporting {
                 instanceId: instanceId,
                 packet: 0,
                 mode: modeString,
-                cookies: [:],
+                cookies: cookies,
                 environment: config.environment,
                 documentReferrer: "",
                 dt: nil,
@@ -110,10 +115,13 @@ struct ConsentReporting {
             )
             
         case .consent:
-            // Merge incoming flags
+            // Merge incoming flags and persist the accumulator so beacons
+            // after a relaunch still carry the full consent state (restored
+            // in configure() while the consent record remains valid).
             for (key, value) in flags {
                 Enforce.storedCookieFlags[key] = value
             }
+            ConsentStore.saveCookieFlags(Enforce.storedCookieFlags)
             // Build cookies dict
             let cookies = Dictionary(uniqueKeysWithValues:
                                         Enforce.storedCookieFlags.map { flag, enabled in

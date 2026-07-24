@@ -16,6 +16,7 @@ final class EnvironmentOverrideTests: XCTestCase {
     override func setUp() {
         super.setUp()
         wipeStore()
+        ConsentStore.hasValidatedExpiry = false
     }
 
     override func tearDown() {

@@ -6,8 +6,30 @@ struct ConsentStore {
     private static let dataKey              = "cheqEnforceConsentData"
     private static let expiryKey            = "cheqEnforceConsentExpirationTime"
     private static let versionKey           = "cheqEnforceConsentVersion"
+    private static let cookieFlagsKey       = "cheqEnforceBeaconCookieFlags"
     private static let environmentKey       = "cheqEnforceEnvironmentOverride"
     private static let environmentExpiryKey = "cheqEnforceEnvironmentOverrideExpiry"
+
+    /// Whether expiry has been evaluated this session. Expiry is checked at
+    /// most once before configure() (on the first read) and at every
+    /// configure() (the session boundary); never on subsequent in-session
+    /// reads, so consent valid at session start stays live until the next
+    /// configure(). Internal so tests can reset it.
+    static var hasValidatedExpiry = false
+
+    /// Expiry-only prune, run at most once per session, covering consent
+    /// reads that happen before configure(). Clears the stored record if it
+    /// has lapsed. (configure() performs the full expiry + version check via
+    /// `loadValid`.)
+    static func validateExpiryOnce() {
+        guard !hasValidatedExpiry else { return }
+        hasValidatedExpiry = true
+        let defaults = UserDefaults.standard
+        if let expiry = defaults.value(forKey: expiryKey) as? Double,
+           Date().timeIntervalSince1970 * 1_000 >= expiry {
+            clearAll()
+        }
+    }
     
     /// Save or merge new consent flags, record version and expiration.
     /// - Parameters:
@@ -21,19 +43,23 @@ struct ConsentStore {
     ) {
         let defaults = UserDefaults.standard
         let now = Date().timeIntervalSince1970 * 1_000
-        
+
+        // Read existing consent via getAll(): the session's one-time expiry
+        // prune has run by then, so a record that lapsed before this session
+        // can't be resurrected by the merge or carry its expiry over below.
+        var existing = getAll()
+
         // Determine new expiration
         let newExpiry: Double
         if let ms = expirationMilliseconds {
             newExpiry = now + Double(ms)
-        } else if let existing = defaults.value(forKey: expiryKey) as? Double {
-            newExpiry = existing
+        } else if let current = defaults.value(forKey: expiryKey) as? Double {
+            newExpiry = current
         } else {
             newExpiry = now + 365 * 24 * 60 * 60 * 1_000
         }
-        
-        // Merge with any existing consent data
-        var existing = defaults.dictionary(forKey: dataKey) as? [String: Bool] ?? [:]
+
+        // Merge new flags over the existing consent data
         for (k, v) in consent {
             existing[k] = v
         }
@@ -51,10 +77,14 @@ struct ConsentStore {
         }
     }
     
-    /// Load saved consent only if not expired and version matches.
+    /// Load saved consent only if not expired and version matches; clears
+    /// storage when invalid. This is the session-boundary gate: it runs
+    /// synchronously in configure(), after which in-session reads never
+    /// re-evaluate expiry.
     /// - Parameter version: current SDK version
     /// - Returns: stored consent or nil if expired/mismatched/not present
     static func loadValid(currentVersion version: String) -> [String: Bool]? {
+        hasValidatedExpiry = true
         let defaults = UserDefaults.standard
         let now = Date().timeIntervalSince1970 * 1_000
         
@@ -76,8 +106,13 @@ struct ConsentStore {
         return defaults.dictionary(forKey: dataKey) as? [String: Bool]
     }
     
-    /// Retrieve full consent dictionary or empty.
+    /// Retrieve full consent dictionary or empty. The first read of a
+    /// session prunes an expired record (so early `getConsent`/`checkConsent`
+    /// calls never report lapsed consent), but reads never re-evaluate
+    /// expiry after that: consent valid at session start remains available
+    /// for the whole session and is removed at the next configure().
     static func getAll() -> [String: Bool] {
+        validateExpiryOnce()
         return UserDefaults.standard.dictionary(forKey: dataKey) as? [String: Bool] ?? [:]
     }
     
@@ -92,6 +127,19 @@ struct ConsentStore {
         return Dictionary(uniqueKeysWithValues: keys.map { ($0, all[$0] ?? false) })
     }
     
+    /// Persist the beacon cookie-flag accumulator (consent categories plus
+    /// interaction flags like BANNER_VIEWED) so beacons after a relaunch
+    /// still carry the full consent state. Shares the consent lifecycle:
+    /// cleared by `clearAll()` on expiry, version change, or clearConsent().
+    static func saveCookieFlags(_ flags: [String: Bool]) {
+        UserDefaults.standard.set(flags, forKey: cookieFlagsKey)
+    }
+
+    /// The persisted beacon cookie-flag accumulator, or empty.
+    static func cookieFlags() -> [String: Bool] {
+        return UserDefaults.standard.dictionary(forKey: cookieFlagsKey) as? [String: Bool] ?? [:]
+    }
+
     /// Persist the environment set via `setEnvironment()` so it can override
     /// the configured environment on future launches. The override carries
     /// its own expiration: initially the consent expiration in effect when
@@ -142,6 +190,7 @@ struct ConsentStore {
         defaults.removeObject(forKey: dataKey)
         defaults.removeObject(forKey: expiryKey)
         defaults.removeObject(forKey: versionKey)
+        defaults.removeObject(forKey: cookieFlagsKey)
     }
     
 }
