@@ -11,6 +11,7 @@
       "description": { "fontName": "AvenirNext-Regular", "fontSize": 15, "fontWeight": "regular", "textAlignment": "left", "textColor": "#37474F" }
     },
     "buttons": {
+      "order": ["rejectAll", "acceptAll", "close", "openModal"],
       "acceptAll": { "backgroundColor": "#2E7D32", "fontName": "AvenirNext-DemiBold", "fontSize": 17, "fontWeight": "semibold", "textColor": "#FFFFFF", "borderColor": "#1B5E20", "borderWidth": 2, "borderRadius": 12 },
       "rejectAll": { "backgroundColor": "#C62828", "textColor": "#FFFFFF" },
       "openModal": { "backgroundColor": "#FFFFFF", "fontName": "Menlo-Regular", "fontSize": 15, "fontWeight": "medium", "textColor": "#6A1B9A", "borderColor": "#6A1B9A", "borderWidth": 2, "borderRadius": 20 },
@@ -31,6 +32,7 @@
       "description": { "fontName": "Georgia", "fontSize": 14, "fontWeight": "regular", "textAlignment": "justified", "textColor": "#37474F" }
     },
     "buttons": {
+      "order": ["save", "acceptAll", "rejectAll", "close"],
       "acceptAll": { "backgroundColor": "#2E7D32", "fontName": "AvenirNext-DemiBold", "fontSize": 16, "fontWeight": "semibold", "textColor": "#FFFFFF", "borderColor": "#1B5E20", "borderWidth": 2, "borderRadius": 12 },
       "rejectAll": { "backgroundColor": "#C62828", "textColor": "#FFFFFF" },
       "save":      { "backgroundColor": "#0277BD", "fontName": "Menlo-Regular", "fontSize": 15, "fontWeight": "medium", "textColor": "#FFFFFF", "borderColor": "#01579B", "borderWidth": 1, "borderRadius": 20 },

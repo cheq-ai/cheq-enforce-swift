@@ -149,19 +149,25 @@ public struct EnforceTheme: Codable {
     }
 
     /// Styles for the banner's buttons. Each is optional; `global` provides
-    /// fallback values for the others.
+    /// fallback values for the others. `order` lists button names top to
+    /// bottom ("acceptAll", "rejectAll", "openModal", "close"); names not
+    /// listed follow in the default order, unknown or duplicate names are
+    /// logged and ignored, and omitting it keeps the default order.
     public struct BannerButtons: Codable {
+        public let order: [String]?
         public let acceptAll: ButtonStyle?
         public let rejectAll: ButtonStyle?
         public let openModal: ButtonStyle?
         public let close: ButtonStyle?
         public let global: ButtonStyle?
 
-        public init(acceptAll: ButtonStyle? = nil,
+        public init(order: [String]? = nil,
+                    acceptAll: ButtonStyle? = nil,
                     rejectAll: ButtonStyle? = nil,
                     openModal: ButtonStyle? = nil,
                     close: ButtonStyle? = nil,
                     global: ButtonStyle? = nil) {
+            self.order = order
             self.acceptAll = acceptAll
             self.rejectAll = rejectAll
             self.openModal = openModal
@@ -171,19 +177,24 @@ public struct EnforceTheme: Codable {
     }
 
     /// Styles for the modal's buttons. Each is optional; `global` provides
-    /// fallback values for the others.
+    /// fallback values for the others. `order` lists button names
+    /// ("acceptAll", "rejectAll", "save", "close") with the same rules as
+    /// the banner's.
     public struct ModalButtons: Codable {
+        public let order: [String]?
         public let acceptAll: ButtonStyle?
         public let rejectAll: ButtonStyle?
         public let save: ButtonStyle?
         public let close: ButtonStyle?
         public let global: ButtonStyle?
 
-        public init(acceptAll: ButtonStyle? = nil,
+        public init(order: [String]? = nil,
+                    acceptAll: ButtonStyle? = nil,
                     rejectAll: ButtonStyle? = nil,
                     save: ButtonStyle? = nil,
                     close: ButtonStyle? = nil,
                     global: ButtonStyle? = nil) {
+            self.order = order
             self.acceptAll = acceptAll
             self.rejectAll = rejectAll
             self.save = save
@@ -507,6 +518,32 @@ enum ThemeResolver {
             borderWidth: pick(\.borderWidth) ?? defaults.borderWidth,
             cornerRadius: pick(\.borderRadius) ?? defaults.cornerRadius
         )
+    }
+
+    /// Applies a theme's button `order` to items keyed by button name.
+    /// Names in `order` come first, in the given order; buttons not listed
+    /// follow in their default order. Duplicate names (first occurrence
+    /// wins) and names that are unknown or not shown by the remote config
+    /// are logged and skipped. A nil or empty order keeps the default.
+    static func orderedButtons<T>(_ items: [(key: String, value: T)], order: [String]?, token: String) -> [T] {
+        guard let order, !order.isEmpty else { return items.map(\.value) }
+
+        var remaining = items
+        var result: [T] = []
+        var seen = Set<String>()
+        for name in order {
+            guard seen.insert(name).inserted else {
+                log.info("Duplicate button '\(name, privacy: .public)' in \(token, privacy: .public); first occurrence wins.")
+                continue
+            }
+            if let index = remaining.firstIndex(where: { $0.key == name }) {
+                result.append(remaining.remove(at: index).value)
+            } else {
+                log.info("Button '\(name, privacy: .public)' in \(token, privacy: .public) is unknown or not shown; ignored.")
+            }
+        }
+        result.append(contentsOf: remaining.map(\.value))
+        return result
     }
 
     /// Resolves a text style against per-role defaults.

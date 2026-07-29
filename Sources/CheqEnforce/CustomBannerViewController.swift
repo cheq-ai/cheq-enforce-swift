@@ -122,11 +122,14 @@ public class CustomBannerViewController: UIViewController {
             contentStack.addArrangedSubview(separator)
         }
 
-        // Buttons; each independently optional, driven by the remote bannerConfig
+        // Buttons; each independently optional, driven by the remote
+        // bannerConfig. Built in the default order, then arranged per the
+        // theme's optional buttons.order.
         let globalStyle = bannerTheme?.buttons?.global
+        var buttons: [(key: String, value: UIButton)] = []
 
         if bannerConfig.ensAcceptAll?.show == true {
-            contentStack.addArrangedSubview(makeButton(
+            buttons.append(("acceptAll", makeButton(
                 title: translation.notificationBannerAllowAll ?? "",
                 style: ThemeResolver.buttonStyle(
                     bannerTheme?.buttons?.acceptAll,
@@ -136,11 +139,11 @@ public class CustomBannerViewController: UIViewController {
                     token: "banner.buttons.acceptAll"
                 ),
                 action: #selector(acceptAllTapped)
-            ))
+            )))
         }
 
         if bannerConfig.ensRejectAll?.show == true {
-            contentStack.addArrangedSubview(makeButton(
+            buttons.append(("rejectAll", makeButton(
                 title: translation.notificationBannerDenyAll ?? "",
                 style: ThemeResolver.buttonStyle(
                     bannerTheme?.buttons?.rejectAll,
@@ -149,11 +152,11 @@ public class CustomBannerViewController: UIViewController {
                     token: "banner.buttons.rejectAll"
                 ),
                 action: #selector(rejectAllTapped)
-            ))
+            )))
         }
 
         if bannerConfig.ensOpenModal?.show == true {
-            contentStack.addArrangedSubview(makeButton(
+            buttons.append(("openModal", makeButton(
                 title: translation.notificationBannerPreferences ?? "",
                 style: ThemeResolver.buttonStyle(
                     bannerTheme?.buttons?.openModal,
@@ -162,11 +165,11 @@ public class CustomBannerViewController: UIViewController {
                     token: "banner.buttons.openModal"
                 ),
                 action: #selector(preferencesTapped)
-            ))
+            )))
         }
 
         if bannerConfig.ensCloseBanner?.show == true {
-            contentStack.addArrangedSubview(makeButton(
+            buttons.append(("close", makeButton(
                 title: translation.close ?? "",
                 style: ThemeResolver.buttonStyle(
                     bannerTheme?.buttons?.close,
@@ -175,7 +178,11 @@ public class CustomBannerViewController: UIViewController {
                     token: "banner.buttons.close"
                 ),
                 action: #selector(closeTapped)
-            ))
+            )))
+        }
+
+        for button in ThemeResolver.orderedButtons(buttons, order: bannerTheme?.buttons?.order, token: "banner.buttons.order") {
+            contentStack.addArrangedSubview(button)
         }
 
         NSLayoutConstraint.activate([

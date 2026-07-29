@@ -36,6 +36,7 @@ The banner is a bottom sheet that slides up from the bottom edge.
 | `separatorColor` | hex color | none (no line drawn) | 1pt divider between description and buttons |
 | `overlayColor` | hex color | `#00000080` (black 50%) | Dimming overlay behind the sheet |
 | `summary.description` | TextStyle | see TextStyle defaults | The banner message text |
+| `buttons.order` | array of button names | `["acceptAll", "rejectAll", "openModal", "close"]` | Top-to-bottom button order (see Button ordering) |
 | `buttons.acceptAll` | ButtonStyle | primary defaults | Accept All button |
 | `buttons.rejectAll` | ButtonStyle | secondary defaults | Deny All button |
 | `buttons.openModal` | ButtonStyle | secondary defaults | Preferences button |
@@ -57,6 +58,7 @@ The consent preferences modal (category toggles).
 | `overlayColor` | hex color | `#00000080` | Dimming overlay (not visible in `fullScreen`) |
 | `summary.title` | TextStyle | 18pt bold, centered, `#000000` | Modal title |
 | `summary.description` | TextStyle | 14pt regular, centered, `#000000` | Modal description |
+| `buttons.order` | array of button names | `["acceptAll", "rejectAll", "save", "close"]` | Button order (see Button ordering) |
 | `buttons.acceptAll` | ButtonStyle | primary defaults | Accept All |
 | `buttons.rejectAll` | ButtonStyle | secondary defaults | Deny All |
 | `buttons.save` | ButtonStyle | secondary defaults | Save |
@@ -66,6 +68,15 @@ The consent preferences modal (category toggles).
 | `categories.toggleOffColor` | hex color | `#D9D9D9`-equivalent gray | Switch off-state track |
 | `categories.title` | TextStyle | 16pt bold, `#000000` | Category name label |
 | `categories.description` | TextStyle | 14pt regular, `#000000` | Category description label |
+
+### Button ordering
+
+`buttons.order` is an array of button names, e.g. `"order": ["rejectAll", "acceptAll", "close"]`:
+
+- Named buttons render first, in the given order; buttons not listed follow in the default order.
+- Duplicate names are ignored (first occurrence wins) and logged.
+- Unknown names, and names for buttons the remote configuration doesn't show, are logged and skipped.
+- Omitting `order` keeps the default order shown in the tables above.
 
 ## Shared blocks
 

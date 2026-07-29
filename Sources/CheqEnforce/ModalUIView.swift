@@ -191,24 +191,27 @@ public class CustomConsentModalViewController: UIViewController {
 
         // Button config; each style resolves `specific ?? global ?? default` when themed
         let globalStyle = modalTheme?.buttons?.global
-        let buttonConfigs: [(shouldShow: Bool, title: String, action: Selector, style: ResolvedButtonStyle?)] = [
-            (modalConfig.ensConsentAcceptAll?.show == true, allowAllTitle, #selector(acceptAll),
+        let buttonConfigs: [(key: String, shouldShow: Bool, title: String, action: Selector, style: ResolvedButtonStyle?)] = [
+            ("acceptAll", modalConfig.ensConsentAcceptAll?.show == true, allowAllTitle, #selector(acceptAll),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.acceptAll, global: globalStyle, defaults: ThemeDefaults.primaryButton, defaultFontWeight: .semibold, token: "modal.buttons.acceptAll") : nil),
-            (modalConfig.ensConsentRejectAll?.show == true, denyAllTitle, #selector(rejectAll),
+            ("rejectAll", modalConfig.ensConsentRejectAll?.show == true, denyAllTitle, #selector(rejectAll),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.rejectAll, global: globalStyle, defaults: ThemeDefaults.secondaryButton, token: "modal.buttons.rejectAll") : nil),
-            (modalConfig.ensSaveModal?.show == true, saveTitle, #selector(saveConsent),
+            ("save", modalConfig.ensSaveModal?.show == true, saveTitle, #selector(saveConsent),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.save, global: globalStyle, defaults: ThemeDefaults.secondaryButton, token: "modal.buttons.save") : nil),
-            (modalConfig.ensCloseModal?.show == true, cancelTitle, #selector(dismissModal),
+            ("close", modalConfig.ensCloseModal?.show == true, cancelTitle, #selector(dismissModal),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.close, global: globalStyle, defaults: ThemeDefaults.textOnlyButton, token: "modal.buttons.close") : nil)
         ]
 
+        // Build shown buttons in default order, then arrange per the theme's
+        // optional buttons.order.
+        let shownButtons: [(key: String, value: UIButton)] = buttonConfigs
+            .filter { $0.shouldShow }
+            .map { ($0.key, createButton(title: $0.title, action: $0.action, style: $0.style)) }
+
         var buttonCount = 0
-        for config in buttonConfigs {
-            if config.shouldShow {
-                let button = createButton(title: config.title, action: config.action, style: config.style)
-                buttonStackView.addArrangedSubview(button)
-                buttonCount += 1
-            }
+        for button in ThemeResolver.orderedButtons(shownButtons, order: modalTheme?.buttons?.order, token: "modal.buttons.order") {
+            buttonStackView.addArrangedSubview(button)
+            buttonCount += 1
         }
         
         // Adjust button stack orientation

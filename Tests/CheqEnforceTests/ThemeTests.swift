@@ -87,6 +87,53 @@ final class ThemeTests: XCTestCase {
         XCTAssertNil(theme.banner?.buttons?.global)
     }
 
+    // MARK: - Button ordering
+
+    private let defaultButtons: [(key: String, value: String)] = [
+        ("acceptAll", "A"), ("rejectAll", "R"), ("openModal", "O"), ("close", "C")
+    ]
+
+    func testOrderNilKeepsDefaultOrder() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: nil, token: "test")
+        XCTAssertEqual(result, ["A", "R", "O", "C"])
+    }
+
+    func testOrderEmptyKeepsDefaultOrder() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: [], token: "test")
+        XCTAssertEqual(result, ["A", "R", "O", "C"])
+    }
+
+    func testOrderFullReorder() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: ["close", "openModal", "rejectAll", "acceptAll"], token: "test")
+        XCTAssertEqual(result, ["C", "O", "R", "A"])
+    }
+
+    func testOrderPartialListsNamedFirstThenDefaultOrder() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: ["close"], token: "test")
+        XCTAssertEqual(result, ["C", "A", "R", "O"], "Unlisted buttons must follow in default order")
+    }
+
+    func testOrderUnknownNameIgnored() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: ["saveEverything", "rejectAll"], token: "test")
+        XCTAssertEqual(result, ["R", "A", "O", "C"])
+    }
+
+    func testOrderDuplicateFirstOccurrenceWins() {
+        let result = ThemeResolver.orderedButtons(defaultButtons, order: ["rejectAll", "close", "rejectAll"], token: "test")
+        XCTAssertEqual(result, ["R", "C", "A", "O"], "Duplicate names must not render a button twice")
+    }
+
+    func testOrderDecodesFromJSON() throws {
+        let json = """
+        { "banner": { "buttons": { "order": ["rejectAll", "acceptAll"] } },
+          "modal":  { "buttons": { "order": ["save", "close"] } } }
+        """
+        let theme = try JSONDecoder().decode(EnforceTheme.self, from: Data(json.utf8))
+
+        XCTAssertEqual(theme.banner?.buttons?.order, ["rejectAll", "acceptAll"])
+        XCTAssertEqual(theme.modal?.buttons?.order, ["save", "close"])
+    }
+
     // MARK: - File loading
 
     func testLoadThemeFromFileURL() throws {

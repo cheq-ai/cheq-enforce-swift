@@ -145,11 +145,16 @@ final class ReportingBeaconTests: XCTestCase {
     func test_beacon_has_utm_params_and_gateway_format() async throws {
         let config = makeConfig(autoShow: false)
 
+        // Unique clientId so a stray async beacon from another test's
+        // configure() can't be picked up instead of this one.
         await ConsentReporting.send(config: config, type: .consent,
-                                    clientId: "client", version: "3", enforcement: false,
+                                    clientId: "utm-gw-consent", version: "3", enforcement: false,
                                     cookieFlags: ["Analytics": true])
 
-        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/c/b.rnc") == true }
+        let req = URLProtocolMock.captured.first {
+            $0.url?.path.contains("/privacy/v1/c/b.rnc") == true
+                && $0.url?.query?.contains("c=utm-gw-consent") == true
+        }
         let url = try XCTUnwrap(req?.url)
 
         let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
@@ -164,10 +169,15 @@ final class ReportingBeaconTests: XCTestCase {
     func test_billing_beacon_has_utm_params_and_gateway_format() async throws {
         let config = makeConfig(autoShow: false)
 
+        // Unique clientId so a stray async beacon from another test's
+        // configure() can't be picked up instead of this one.
         await ConsentReporting.send(config: config, type: .billing,
-                                    clientId: "client", version: "3", enforcement: true)
+                                    clientId: "utm-gw-billing", version: "3", enforcement: true)
 
-        let req = URLProtocolMock.captured.first { $0.url?.path.contains("/privacy/v1/b/b.rnc") == true }
+        let req = URLProtocolMock.captured.first {
+            $0.url?.path.contains("/privacy/v1/b/b.rnc") == true
+                && $0.url?.query?.contains("c=utm-gw-billing") == true
+        }
         let url = try XCTUnwrap(req?.url)
 
         let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
