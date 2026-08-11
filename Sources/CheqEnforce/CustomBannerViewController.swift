@@ -148,7 +148,8 @@ public class CustomBannerViewController: UIViewController {
                 style: ThemeResolver.buttonStyle(
                     bannerTheme?.buttons?.rejectAll,
                     global: globalStyle,
-                    defaults: ThemeDefaults.secondaryButton,
+                    defaults: ThemeDefaults.primaryButton,
+                    defaultFontWeight: .semibold,
                     token: "banner.buttons.rejectAll"
                 ),
                 action: #selector(rejectAllTapped)

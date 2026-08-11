@@ -176,9 +176,24 @@ public class CustomConsentModalViewController: UIViewController {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stackView)
 
+        // Optional themed separator between category rows (same absent/empty
+        // semantics as modal.separatorColor); never drawn after the last row.
+        var categorySeparatorColor: UIColor?
+        if isThemed, let separatorHex = modalTheme?.categories?.separatorColor, !separatorHex.isEmpty {
+            categorySeparatorColor = ThemeResolver.color(separatorHex, fallback: .clear, token: "modal.categories.separatorColor")
+        }
+
         for (index, section) in sections.enumerated() {
             let sectionView = createSectionView(title: section.title, description: section.description, index: index)
             stackView.addArrangedSubview(sectionView)
+
+            if let categorySeparatorColor, index < sections.count - 1 {
+                let separator = UIView()
+                separator.backgroundColor = categorySeparatorColor
+                separator.translatesAutoresizingMaskIntoConstraints = false
+                separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+                stackView.addArrangedSubview(separator)
+            }
         }
 
         // Setup button stack (outside scrollView)
@@ -195,7 +210,7 @@ public class CustomConsentModalViewController: UIViewController {
             ("acceptAll", modalConfig.ensConsentAcceptAll?.show == true, allowAllTitle, #selector(acceptAll),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.acceptAll, global: globalStyle, defaults: ThemeDefaults.primaryButton, defaultFontWeight: .semibold, token: "modal.buttons.acceptAll") : nil),
             ("rejectAll", modalConfig.ensConsentRejectAll?.show == true, denyAllTitle, #selector(rejectAll),
-             isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.rejectAll, global: globalStyle, defaults: ThemeDefaults.secondaryButton, token: "modal.buttons.rejectAll") : nil),
+             isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.rejectAll, global: globalStyle, defaults: ThemeDefaults.primaryButton, defaultFontWeight: .semibold, token: "modal.buttons.rejectAll") : nil),
             ("save", modalConfig.ensSaveModal?.show == true, saveTitle, #selector(saveConsent),
              isThemed ? ThemeResolver.buttonStyle(modalTheme?.buttons?.save, global: globalStyle, defaults: ThemeDefaults.secondaryButton, token: "modal.buttons.save") : nil),
             ("close", modalConfig.ensCloseModal?.show == true, cancelTitle, #selector(dismissModal),

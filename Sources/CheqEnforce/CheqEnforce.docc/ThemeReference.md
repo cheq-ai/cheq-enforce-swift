@@ -38,7 +38,7 @@ The banner is a bottom sheet that slides up from the bottom edge.
 | `summary.description` | TextStyle | see TextStyle defaults | The banner message text |
 | `buttons.order` | array of button names | `["acceptAll", "rejectAll", "openModal", "close"]` | Top-to-bottom button order (see Button ordering) |
 | `buttons.acceptAll` | ButtonStyle | primary defaults | Accept All button |
-| `buttons.rejectAll` | ButtonStyle | secondary defaults | Deny All button |
+| `buttons.rejectAll` | ButtonStyle | primary defaults | Deny All button (defaults match Accept All so neither consent choice is visually privileged, per GDPR guidance) |
 | `buttons.openModal` | ButtonStyle | secondary defaults | Preferences button |
 | `buttons.close` | ButtonStyle | text-only defaults | Close button |
 | `buttons.global` | ButtonStyle | n/a | Fallback for any missing per-button value |
@@ -60,12 +60,13 @@ The consent preferences modal (category toggles).
 | `summary.description` | TextStyle | 14pt regular, centered, `#000000` | Modal description |
 | `buttons.order` | array of button names | `["acceptAll", "rejectAll", "save", "close"]` | Button order (see Button ordering) |
 | `buttons.acceptAll` | ButtonStyle | primary defaults | Accept All |
-| `buttons.rejectAll` | ButtonStyle | secondary defaults | Deny All |
+| `buttons.rejectAll` | ButtonStyle | primary defaults | Deny All (defaults match Accept All, per GDPR guidance) |
 | `buttons.save` | ButtonStyle | secondary defaults | Save |
 | `buttons.close` | ButtonStyle | text-only defaults | Cancel/Close |
 | `buttons.global` | ButtonStyle | n/a | Fallback for missing per-button values |
 | `categories.toggleOnColor` | hex color | system blue | Switch on-state tint |
 | `categories.toggleOffColor` | hex color | `#D9D9D9`-equivalent gray | Switch off-state track |
+| `categories.separatorColor` | hex color | none (no lines drawn) | 1pt divider between category rows; never drawn after the last row |
 | `categories.title` | TextStyle | 16pt bold, `#000000` | Category name label |
 | `categories.description` | TextStyle | 14pt regular, `#000000` | Category description label |
 
@@ -96,7 +97,7 @@ The consent preferences modal (category toggles).
 
 ### ButtonStyle
 
-| Key | Type | Primary default (acceptAll) | Secondary default | Text-only default (close) |
+| Key | Type | Primary default (acceptAll, rejectAll) | Secondary default (openModal, save) | Text-only default (close) |
 |---|---|---|---|---|
 | `backgroundColor` | hex color | system blue | `#EBEBEB`-equivalent gray | transparent |
 | `textColor` | hex color | `#FFFFFF` | `#000000` | gray |
@@ -159,6 +160,7 @@ These rules keep one theme document rendering identically on iOS, Android, and w
     "categories": {
       "toggleOnColor": "#1E478F",
       "toggleOffColor": "#D9D9D9",
+      "separatorColor": "#E5E5E5",
       "title":       { "fontSize": 16, "fontWeight": "bold", "textColor": "#1A1A1A" },
       "description": { "fontSize": 14, "textColor": "#666666" }
     }

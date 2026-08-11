@@ -43,6 +43,7 @@ final class ThemeTests: XCTestCase {
             "categories": {
               "toggleOnColor": "#1E478F",
               "toggleOffColor": "#D9D9D9",
+              "separatorColor": "#CCCCCC",
               "title":       { "fontSize": 16, "fontWeight": "bold", "textColor": "#000000" },
               "description": { "fontSize": 14, "textColor": "#666666" }
             }
@@ -69,6 +70,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(theme.modal?.summary?.title?.fontWeight, .bold)
         XCTAssertEqual(theme.modal?.categories?.toggleOnColor, "#1E478F")
         XCTAssertEqual(theme.modal?.categories?.toggleOffColor, "#D9D9D9")
+        XCTAssertEqual(theme.modal?.categories?.separatorColor, "#CCCCCC")
         XCTAssertEqual(theme.modal?.categories?.description?.textColor, "#666666")
         XCTAssertNil(theme.modal?.logoUIImage, "Programmatic logo must not decode from JSON")
     }

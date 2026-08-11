@@ -60,6 +60,7 @@ struct TranslationService {
         
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
+        req.cachePolicy = .reloadRevalidatingCacheData
         
         HTTPLogger.logRequest(req, enabled: debug)
         let (data, resp) = try await session.data(for: req)

@@ -42,6 +42,7 @@
     "categories": {
       "toggleOnColor": "#2E7D32",
       "toggleOffColor": "#B0BEC5",
+      "separatorColor": "#8D6E63",
       "title":       { "fontName": "TimesNewRomanPS-BoldMT", "fontSize": 16, "fontWeight": "bold", "textAlignment": "left", "textColor": "#4E342E" },
       "description": { "fontName": "TimesNewRomanPSMT", "fontSize": 13, "fontWeight": "regular", "textAlignment": "left", "textColor": "#6D4C41" }
     }

@@ -207,15 +207,18 @@ public struct EnforceTheme: Codable {
     public struct Categories: Codable {
         public let toggleOnColor: String?      // hex - UISwitch on tint
         public let toggleOffColor: String?     // hex - UISwitch off-state track
+        public let separatorColor: String?     // hex - divider between category rows (none after the last)
         public let title: TextStyle?           // category name label
         public let description: TextStyle?     // category description label
 
         public init(toggleOnColor: String? = nil,
                     toggleOffColor: String? = nil,
+                    separatorColor: String? = nil,
                     title: TextStyle? = nil,
                     description: TextStyle? = nil) {
             self.toggleOnColor = toggleOnColor
             self.toggleOffColor = toggleOffColor
+            self.separatorColor = separatorColor
             self.title = title
             self.description = description
         }
@@ -443,7 +446,8 @@ enum ThemeDefaults {
     static let toggleOn   = UIColor.systemBlue
     static let toggleOff  = UIColor(white: 0.85, alpha: 1)
 
-    /// Filled brand button (Accept All).
+    /// Filled brand button (Accept All, Reject All — matched so neither
+    /// consent choice is visually privileged, per GDPR guidance).
     static let primaryButton = ResolvedButtonStyle(
         backgroundColor: .systemBlue,
         textColor: .white,
@@ -453,7 +457,7 @@ enum ThemeDefaults {
         cornerRadius: 8
     )
 
-    /// Light gray filled button (Reject All, Preferences, Save).
+    /// Light gray filled button (Preferences, Save).
     static let secondaryButton = ResolvedButtonStyle(
         backgroundColor: UIColor(white: 0.92, alpha: 1),
         textColor: .black,

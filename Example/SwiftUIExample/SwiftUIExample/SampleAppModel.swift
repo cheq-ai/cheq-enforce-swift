@@ -123,6 +123,7 @@ final class SampleAppModel {
             autoShow: autoShow,
             version: "1",
             defaultConsent: ["Analytics": true, "Marketing": false, "Functional": true],
+            appearance: .default,
             theme: themed ? Self.theme(for: choice) : nil
         ))
 
@@ -334,6 +335,7 @@ final class SampleAppModel {
             ),
             buttons: EnforceTheme.BannerButtons(
                 acceptAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
+                rejectAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
                 close: EnforceTheme.ButtonStyle(backgroundColor: "#00000000", textColor: "#FE0072"),
                 global: EnforceTheme.ButtonStyle(backgroundColor: "#EEF1FA", fontName: "AvenirNext-Medium", fontSize: 16, textColor: "#34163E", borderRadius: 22)
             )
@@ -350,6 +352,7 @@ final class SampleAppModel {
             ),
             buttons: EnforceTheme.ModalButtons(
                 acceptAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
+                rejectAll: EnforceTheme.ButtonStyle(backgroundColor: "#FE0072", fontName: "AvenirNext-DemiBold", textColor: "#FFFFFF"),
                 close: EnforceTheme.ButtonStyle(backgroundColor: "#00000000", textColor: "#FE0072"),
                 global: EnforceTheme.ButtonStyle(backgroundColor: "#EEF1FA", fontName: "AvenirNext-Medium", fontSize: 16, textColor: "#34163E", borderRadius: 22)
             ),
