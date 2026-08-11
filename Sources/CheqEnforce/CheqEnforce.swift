@@ -4,7 +4,7 @@ import UIKit
 
 public class Enforce {
     static internal let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
-    private static var storedConfig: Config?
+    static var storedConfig: Config?
 
     /// The currently presented consent banner (alert or themed bottom sheet),
     /// if any. Tracked so it can be dismissed by `clearConsent()`.
@@ -329,6 +329,23 @@ public class Enforce {
         )
     }
 
+    /// Errors thrown by ``setEnvironment(_:)``.
+    public enum EnvironmentError: Error, LocalizedError, Equatable {
+        /// ``configure(_:)`` has not been called yet.
+        case notConfigured
+        /// The environment string is empty or cannot form a valid URL.
+        case invalidEnvironment(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .notConfigured:
+                return "Enforce.configure() must be called before setEnvironment()."
+            case .invalidEnvironment(let environment):
+                return "Invalid environment string: “\(environment)”."
+            }
+        }
+    }
+
     ///Change the environment string (you must call `configure` first).
     ///
     /// The new environment is persisted and overrides the configured one on
@@ -339,13 +356,35 @@ public class Enforce {
     /// use ``resetEnvironment()`` to discard it explicitly.
     ///
     /// - Parameter environment: the new `environment` value.
-    /// - Throws: `URLError` or `DecodingError` if the JSON at the new URL can’t be fetched/parsed.
+    /// - Throws: ``EnvironmentError`` if `configure` hasn’t been called or the
+    ///   environment string is empty/invalid; `URLError` or `DecodingError` if
+    ///   the JSON at the new URL can’t be fetched/parsed.
     public static func setEnvironment(_ environment: String) async throws {
+        let fn = #function
         guard let currentConfig = storedConfig else {
             log.error("Config not found. Ensure `configure` was called first.")
-            return
+            throw EnvironmentError.notConfigured
         }
-        
+
+        // Error beacons need a clientId, which only exists once the initial
+        // fetch has decoded; without one the beacon is skipped, never the
+        // validation.
+        let clientId = Enforce.lastResponse?.clientId
+        func reportError(_ msg: String) {
+            guard let clientId else { return }
+            Task {
+                _ = await ErrorReporting.sendError(msg: msg, fn: fn, clientId: clientId, config: currentConfig)
+            }
+        }
+
+        // Reject empty input up front: an empty path component would silently
+        // drop out of the URL and fetch a different (env-less) document.
+        guard !environment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            log.error("Invalid environment string: empty")
+            reportError("Invalid environment string: empty")
+            throw EnvironmentError.invalidEnvironment(environment)
+        }
+
         // Create a new Config instance with the updated environment
         let updatedConfig = Config(
             currentConfig.clientName,
@@ -359,23 +398,19 @@ public class Enforce {
             appearance: currentConfig.appearance,
             theme: currentConfig.theme
         )
-        
-        guard let resp = Enforce.lastResponse else { return }
-        
+
         // construct the URL
         guard let url = TranslationService.buildURL(config: updatedConfig) else {
             log.error("Invalid environment string: \(environment, privacy: .public)")
-            Task {
-                _ = await ErrorReporting.sendError(msg: "Invalid environment string", fn: #function, clientId: resp.clientId, config: currentConfig)
-            }
-            return
+            reportError("Invalid environment string")
+            throw EnvironmentError.invalidEnvironment(environment)
         }
-        
+
         do {
             // try to fetch & parse the JSON; this validates that the env really exists
             let data = try await TranslationService.fetchJSON(from: url, debug: currentConfig.debug)
             _ = try JSONDecoder().decode(JSONResponse.self, from: data)
-            
+
             // Successfully fetched. Store new config and persist the override
             // so future launches keep this environment (until consent expires).
             storedConfig = updatedConfig
@@ -384,9 +419,7 @@ public class Enforce {
         } catch {
             // fetch or decode failed; roll back
             log.error("Environment ‘\(environment)’ isn’t valid, keeping previous “\(currentConfig.environment)”; error: \(error.localizedDescription, privacy: .public)")
-            Task {
-                _ = await ErrorReporting.sendError(msg: "Environment ‘\(environment)’ isn’t valid, keeping previous", fn: #function, clientId: resp.clientId, config: currentConfig)
-            }
+            reportError("Environment ‘\(environment)’ isn’t valid, keeping previous")
             throw error
         }
     }

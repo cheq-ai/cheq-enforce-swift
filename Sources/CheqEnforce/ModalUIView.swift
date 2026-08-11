@@ -451,12 +451,8 @@ public class CustomConsentModalViewController: UIViewController {
             descriptionLabel.trailingAnchor.constraint(equalTo: toggleSwitch.leadingAnchor, constant: -10),
             descriptionLabel.bottomAnchor.constraint(equalTo: sectionView.bottomAnchor),
 
-            // Toggles pin to the trailing edge so every row's switch aligns
-            // at the same point regardless of text length. The labels' equal
-            // trailing constraints give them a fixed width to wrap within
-            // (text draws left-aligned, so short text simply leaves a gap).
             toggleSwitch.trailingAnchor.constraint(equalTo: sectionView.trailingAnchor),
-            toggleSwitch.centerYAnchor.constraint(equalTo: sectionView.centerYAnchor),
+            toggleSwitch.topAnchor.constraint(equalTo: sectionView.topAnchor),
         ])
         
         return sectionView

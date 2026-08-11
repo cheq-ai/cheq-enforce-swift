@@ -214,4 +214,51 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         XCTAssertEqual(Enforce.getEnvironment(), "English")
     }
+
+    // MARK: - setEnvironment validation
+
+    func testSetEnvironmentBeforeConfigureThrowsNotConfigured() async {
+        Enforce.storedConfig = nil
+
+        do {
+            try await Enforce.setEnvironment("staging")
+            XCTFail("setEnvironment must throw when configure() has not been called")
+        } catch let error as Enforce.EnvironmentError {
+            XCTAssertEqual(error, .notConfigured)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testSetEnvironmentEmptyStringThrowsInvalidEnvironment() async {
+        Enforce.configure(makeConfig(environment: "English"))
+
+        do {
+            try await Enforce.setEnvironment("")
+            XCTFail("setEnvironment must throw for an empty environment")
+        } catch let error as Enforce.EnvironmentError {
+            XCTAssertEqual(error, .invalidEnvironment(""))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(Enforce.getEnvironment(), "English", "A failed setEnvironment must not change the environment")
+        XCTAssertNil(ConsentStore.validEnvironmentOverride(), "A failed setEnvironment must not persist an override")
+    }
+
+    func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
+        Enforce.configure(makeConfig(environment: "English"))
+
+        do {
+            try await Enforce.setEnvironment("   ")
+            XCTFail("setEnvironment must throw for a whitespace-only environment")
+        } catch let error as Enforce.EnvironmentError {
+            XCTAssertEqual(error, .invalidEnvironment("   "))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(Enforce.getEnvironment(), "English")
+        XCTAssertNil(ConsentStore.validEnvironmentOverride())
+    }
 }
