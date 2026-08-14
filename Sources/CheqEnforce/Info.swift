@@ -3,7 +3,7 @@ import UIKit
 
 enum Info {
     static let library = "cheq-enforce-swift"
-    static let version = "0.1.3"
+    static let version = "0.2.0"
     static let platform = "ios"
 
     /// utm query items identifying the SDK, appended to every outgoing
