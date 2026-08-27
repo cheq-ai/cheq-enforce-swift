@@ -20,9 +20,19 @@ public class Enforce {
     private static var consentHandlers: [ConsentChangeHandler] = []
 
     /// register a callback to run *every* time consent is updated
+    ///
+    /// If the SDK is already configured and consent is available, the handler
+    /// is also invoked immediately with the current consent, so registration
+    /// before or after ``configure(_:)`` behaves the same.
     /// - Parameter handler: receives the *current* full consent dictionary
     public static func onConsent(_ handler: @escaping ConsentChangeHandler) {
         consentHandlers.append(handler)
+        if storedConfig != nil {
+            let current = getConsent()
+            if !current.isEmpty {
+                handler(current)
+            }
+        }
     }
     
     #if DEBUG
@@ -37,8 +47,10 @@ public class Enforce {
     static var  cachedInstanceId: String = {
         return randomBase36InstanceId()
     }()
-    static var beaconCount: Int = 0
-    static var storedCookieFlags: [String: Bool] = [:]
+    static var storedCookieFlags: [String: Bool] {
+        get { BeaconState.cookieFlags }
+        set { BeaconState.setCookieFlags(newValue) }
+    }
     
     let config:Config
     init(config: Config) {
@@ -66,12 +78,13 @@ public class Enforce {
         // if the consent record lapsed. Categories from the validated
         // consent are merged in as a fallback for records stored before
         // flag persistence existed.
-        storedCookieFlags = ConsentStore.cookieFlags()
+        var restoredFlags = ConsentStore.cookieFlags()
         if let saved = validConsentAtLaunch {
-            for (key, value) in saved where storedCookieFlags[key] == nil {
-                storedCookieFlags[key] = value
+            for (key, value) in saved where restoredFlags[key] == nil {
+                restoredFlags[key] = value
             }
         }
+        storedCookieFlags = restoredFlags
 
         // Remember the app-supplied environment so resetEnvironment() can
         // return to it, then apply a persisted setEnvironment() override
@@ -86,12 +99,15 @@ public class Enforce {
         // Store the config for later use
         storedConfig = config
         
-        //Trigger consent callbacks
+        // Trigger consent callbacks when there is consent to report; an empty
+        // map is reserved for clearConsent()'s "consent revoked" signal.
         let latest = getConsent()
-        for handler in consentHandlers {
-            handler(latest)
+        if !latest.isEmpty {
+            for handler in consentHandlers {
+                handler(latest)
+            }
         }
-        
+
         //Get translations and show banner or modal
         Task {
             do {
@@ -254,7 +270,7 @@ public class Enforce {
 
         // Reset the in-memory cookie-flag accumulator so subsequent reporting
         // beacons don't carry over consent flags from before the clear.
-        storedCookieFlags.removeAll()
+        storedCookieFlags = [:]
 
         // Notify onConsent subscribers that consent is now absent.
         for handler in consentHandlers {
@@ -409,11 +425,13 @@ public class Enforce {
         do {
             // try to fetch & parse the JSON; this validates that the env really exists
             let data = try await TranslationService.fetchJSON(from: url, debug: currentConfig.debug)
-            _ = try JSONDecoder().decode(JSONResponse.self, from: data)
+            let response = try JSONDecoder().decode(JSONResponse.self, from: data)
 
-            // Successfully fetched. Store new config and persist the override
-            // so future launches keep this environment (until consent expires).
+            // Successfully fetched. Store new config, adopt the new
+            // environment's response, and persist the override so future
+            // launches keep this environment (until consent expires).
             storedConfig = updatedConfig
+            Enforce.lastResponse = response
             ConsentStore.saveEnvironmentOverride(environment)
             log.info("Environment updated to: \(environment, privacy: .public)")
         } catch {

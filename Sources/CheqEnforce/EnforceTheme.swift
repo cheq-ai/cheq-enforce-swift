@@ -512,16 +512,73 @@ enum ThemeResolver {
         func pick<T>(_ keyPath: KeyPath<EnforceTheme.ButtonStyle, T?>) -> T? {
             specific?[keyPath: keyPath] ?? global?[keyPath: keyPath]
         }
+        // Empty strings mean "not set" and must fall through to global.
+        func pickString(_ keyPath: KeyPath<EnforceTheme.ButtonStyle, String?>) -> String? {
+            if let value = specific?[keyPath: keyPath], !value.isEmpty { return value }
+            if let value = global?[keyPath: keyPath], !value.isEmpty { return value }
+            return nil
+        }
         let size = pick(\.fontSize) ?? defaultFontSize
         let weight = pick(\.fontWeight)?.uiFontWeight ?? defaultFontWeight
         return ResolvedButtonStyle(
-            backgroundColor: color(pick(\.backgroundColor), fallback: defaults.backgroundColor, token: "\(token).backgroundColor"),
-            textColor: color(pick(\.textColor), fallback: defaults.textColor, token: "\(token).textColor"),
-            font: font(name: pick(\.fontName), size: size, weight: weight),
-            borderColor: color(pick(\.borderColor), fallback: defaults.borderColor, token: "\(token).borderColor"),
+            backgroundColor: color(pickString(\.backgroundColor), fallback: defaults.backgroundColor, token: "\(token).backgroundColor"),
+            textColor: color(pickString(\.textColor), fallback: defaults.textColor, token: "\(token).textColor"),
+            font: font(name: pickString(\.fontName), size: size, weight: weight),
+            borderColor: color(pickString(\.borderColor), fallback: defaults.borderColor, token: "\(token).borderColor"),
             borderWidth: pick(\.borderWidth) ?? defaults.borderWidth,
             cornerRadius: pick(\.borderRadius) ?? defaults.cornerRadius
         )
+    }
+
+    /// Wraps a logo image in a container so it can be aligned
+    /// left/center/right/full (shared by the banner and the modal).
+    static func makeLogoView(_ image: UIImage, alignment: EnforceTheme.LogoAlignment?) -> UIView {
+        let wrapper = UIView()
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(imageView)
+
+        var constraints = [
+            imageView.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            imageView.heightAnchor.constraint(equalToConstant: 40)
+        ]
+
+        // Preferred, not required: an over-wide logo (aspect width exceeding
+        // the container) compresses to fit instead of conflicting with the
+        // edge constraints and overflowing the container.
+        let aspect = image.size.width / max(image.size.height, 1)
+        let aspectConstraint = imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor, multiplier: aspect)
+        aspectConstraint.priority = .defaultHigh
+
+        switch alignment ?? .center {
+        case .left:
+            constraints += [
+                aspectConstraint,
+                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+                imageView.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor)
+            ]
+        case .center:
+            constraints += [
+                aspectConstraint,
+                imageView.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
+                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
+            ]
+        case .right:
+            constraints += [
+                aspectConstraint,
+                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
+            ]
+        case .full:
+            constraints += [
+                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
+        return wrapper
     }
 
     /// Applies a theme's button `order` to items keyed by button name.

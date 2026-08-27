@@ -5,7 +5,7 @@ public class CustomConsentModalViewController: UIViewController {
     private let titleText: String
     private let descriptionText: String
     private let modalConfig: ConsentModalConfig
-    private let sections: [(title: String, description: String)]
+    private let sections: [(key: String, title: String, description: String)]
     private let config: Config
 
     private let allowAllTitle: String
@@ -14,7 +14,7 @@ public class CustomConsentModalViewController: UIViewController {
     private let cancelTitle: String
     private var buttonStackView: UIStackView!
 
-    private var toggleStates: [Bool]
+    private(set) var toggleStates: [Bool]
 
     /// Modal theme tokens; non-nil handling only applies when `isThemed`.
     private let modalTheme: EnforceTheme.Modal?
@@ -29,7 +29,7 @@ public class CustomConsentModalViewController: UIViewController {
         title: String,
         description: String,
         modalConfig: ConsentModalConfig,
-        sections: [(title: String, description: String)],
+        sections: [(key: String, title: String, description: String)],
         config: Config,
         allowAllTitle: String,
         denyAllTitle: String,
@@ -44,7 +44,7 @@ public class CustomConsentModalViewController: UIViewController {
         self.config = config
         // Seed the toggles from stored consent so the modal reflects the
         // user's current choices (categories without stored consent are off).
-        self.toggleStates = sections.map { ConsentStore.get($0.title) }
+        self.toggleStates = sections.map { ConsentStore.get($0.key) }
         self.allowAllTitle = allowAllTitle
         self.denyAllTitle = denyAllTitle
         self.saveTitle = saveTitle
@@ -116,7 +116,7 @@ public class CustomConsentModalViewController: UIViewController {
         // Optional themed logo above the title
         var logoView: UIView?
         if isThemed, let logo {
-            let wrapper = makeLogoView(logo)
+            let wrapper = ThemeResolver.makeLogoView(logo, alignment: modalTheme?.logoAlignment)
             wrapper.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(wrapper)
             logoView = wrapper
@@ -337,56 +337,6 @@ public class CustomConsentModalViewController: UIViewController {
         return button
     }
 
-    /// Wraps the logo in a container so it can be aligned left/center/right/full.
-    private func makeLogoView(_ image: UIImage) -> UIView {
-        let wrapper = UIView()
-        let imageView = UIImageView(image: image)
-        imageView.contentMode = .scaleAspectFit
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        wrapper.addSubview(imageView)
-
-        var constraints = [
-            imageView.topAnchor.constraint(equalTo: wrapper.topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 40)
-        ]
-
-        // Preferred, not required: an over-wide logo (aspect width exceeding the
-        // container) compresses to fit instead of conflicting with the edge
-        // constraints and overflowing the modal.
-        let aspect = image.size.width / max(image.size.height, 1)
-        let aspectConstraint = imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor, multiplier: aspect)
-        aspectConstraint.priority = .defaultHigh
-
-        switch modalTheme?.logoAlignment ?? .center {
-        case .left:
-            constraints += [
-                aspectConstraint,
-                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-                imageView.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor)
-            ]
-        case .center:
-            constraints += [
-                aspectConstraint,
-                imageView.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
-                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
-            ]
-        case .right:
-            constraints += [
-                aspectConstraint,
-                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
-            ]
-        case .full:
-            constraints += [
-                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
-            ]
-        }
-        NSLayoutConstraint.activate(constraints)
-        return wrapper
-    }
-    
     private func createSectionView(title: String, description: String, index: Int) -> UIView {
         let sectionView = UIView()
         sectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -480,9 +430,7 @@ public class CustomConsentModalViewController: UIViewController {
         // Create a dictionary with categories and state (user defined)
         var consentData: [String: Bool] = [:]
         for (index, section) in sections.enumerated() {
-            let sectionTitle = section.title
-            let toggleState = toggleStates[index]
-            consentData[sectionTitle] = toggleState
+            consentData[section.key] = toggleStates[index]
         }
         
         saveAndDismiss(consentData: consentData)
@@ -512,8 +460,8 @@ public class CustomConsentModalViewController: UIViewController {
     
     private func createConsentData(state: Bool) -> [String: Bool] {
         var consentData: [String: Bool] = [:]
-        for (_, section) in sections.enumerated() {
-            consentData[section.title] = state
+        for section in sections {
+            consentData[section.key] = state
         }
         return consentData
     }

@@ -246,6 +246,33 @@ final class EnvironmentOverrideTests: XCTestCase {
         XCTAssertNil(ConsentStore.validEnvironmentOverride(), "A failed setEnvironment must not persist an override")
     }
 
+    func testSetEnvironmentSuccessAdoptsNewEnvironmentsResponse() async throws {
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        defer {
+            TranslationService._testProtocolClasses = nil
+            URLProtocolMock.reset()
+            Enforce.lastResponse = nil
+        }
+        URLProtocolMock.responder = { _ in
+            let json = """
+            {"clientId":"newEnvClient","version":"9","enforcement":false,
+             "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
+            """
+            return (200, Data(json.utf8))
+        }
+
+        Enforce.storedConfig = makeConfig(environment: "English")
+        Enforce.lastResponse = nil
+
+        try await Enforce.setEnvironment("French")
+
+        XCTAssertEqual(Enforce.getEnvironment(), "French")
+        XCTAssertEqual(Enforce.lastResponse?.clientId, "newEnvClient",
+                       "setEnvironment must adopt the fetched response so getConfiguration() reflects the new environment")
+        XCTAssertEqual(Enforce.getConfiguration()?.version, "9")
+        XCTAssertEqual(ConsentStore.validEnvironmentOverride(), "French")
+    }
+
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
         Enforce.configure(makeConfig(environment: "English"))
 

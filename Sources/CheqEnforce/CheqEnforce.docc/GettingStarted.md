@@ -126,7 +126,7 @@ Enforce.showModal()
 
 ### `onConsent` Callback
 
-Enforce’s `onConsent` API lets you register one or more callbacks that will be invoked whenever consent settings change as well as on start up if consent is already available. Each callback receives the full, up-to-date consent dictionary.
+Enforce’s `onConsent` API lets you register one or more callbacks that will be invoked whenever consent settings change. Each callback receives the full, up-to-date consent dictionary. If consent is already available, a callback also receives it up front — on `configure(_:)` for callbacks registered earlier, or immediately on registration afterwards — so registration order doesn’t matter. An empty dictionary is only delivered by `clearConsent()`, signalling that consent has been revoked.
 
 ```swift
 Enforce.onConsent { consent in

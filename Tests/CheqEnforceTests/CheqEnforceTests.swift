@@ -134,6 +134,48 @@ final class EnforceTests: XCTestCase {
     wait(for: [exp], timeout: 1)
   }
 
+  func testOnConsentReplaysCurrentConsentToLateSubscribers() {
+    Enforce.setConsent(["Analytics": true])
+
+    var received: [String: Bool]?
+    Enforce.onConsent { received = $0 }
+
+    XCTAssertEqual(received, ["Analytics": true],
+                   "Handlers registered after configure must immediately receive the current consent")
+  }
+
+  func testOnConsentDoesNotReplayWhenNoConsentStored() {
+    var callCount = 0
+    Enforce.onConsent { _ in callCount += 1 }
+
+    XCTAssertEqual(callCount, 0,
+                   "Registration must not fire the handler when no consent is stored")
+  }
+
+  func testConfigureDoesNotNotifyHandlersWithEmptyConsent() {
+    var callCount = 0
+    Enforce.onConsent { _ in callCount += 1 }
+
+    Enforce.configure(Config("testClient", publishPath: "testPath", environment: "testEnv", autoShow: false))
+
+    XCTAssertEqual(callCount, 0,
+                   "configure() must not fire handlers when there is no consent to report")
+  }
+
+  func testConfigureNotifiesEarlySubscribersWithStoredConsent() {
+    ConsentStore.save(["Analytics": true], version: "1", expirationMilliseconds: 60_000)
+    Enforce._resetConsentHandlers()
+
+    var received: [String: Bool]?
+    Enforce.onConsent { received = $0 }
+    received = nil   // discard the registration replay; test configure's own fan-out
+
+    Enforce.configure(Config("testClient", publishPath: "testPath", environment: "testEnv", autoShow: false, version: "1"))
+
+    XCTAssertEqual(received, ["Analytics": true],
+                   "configure() must deliver stored consent to handlers registered before it")
+  }
+
   func testClearConsentRemovesStoredData() async {
     // seed some stored consent
     Enforce.setConsent(["Analytics": true, "Marketing": true])

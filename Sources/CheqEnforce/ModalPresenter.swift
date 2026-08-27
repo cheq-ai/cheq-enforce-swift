@@ -29,14 +29,14 @@ struct ModalPresenter {
             
             log.info("Presenting consent modal")
             
-            let sections: [(title: String, description: String)] =
+            let sections: [(key: String, title: String, description: String)] =
             (translation.cookies ?? [:])
                 .sorted { $0.key < $1.key }
-                .compactMap { (_, details) in
+                .compactMap { (key, details) in
                     guard let title = details.title,
                           let desc  = details.description
                     else { return nil }
-                    return (title: title, description: desc)
+                    return (key: key, title: title, description: desc)
                 }
             
             // Ensure modal title & description exist

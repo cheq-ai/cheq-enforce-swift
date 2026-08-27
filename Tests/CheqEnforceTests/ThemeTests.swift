@@ -261,9 +261,19 @@ final class ThemeTests: XCTestCase {
 
         let resolved = ThemeResolver.buttonStyle(specific, global: global, defaults: ThemeDefaults.primaryButton, token: "test")
 
-        // Empty string is "absent"; but note: `specific ?? global` picks specific's
-        // non-nil empty string, then color() falls back. Falls to default, not global.
+        // Empty string means "not set" and falls through like an omitted key:
+        // specific ("") → global (#0000FF), per ThemeReference rules 1 and 4.
+        XCTAssertEqual(resolved.backgroundColor, UIColor(hex: "#0000FF"))
+    }
+
+    func testEmptyStringOnGlobalFallsToDefault() {
+        let specific = EnforceTheme.ButtonStyle(fontName: "")
+        let global = EnforceTheme.ButtonStyle(backgroundColor: "", fontName: "")
+
+        let resolved = ThemeResolver.buttonStyle(specific, global: global, defaults: ThemeDefaults.primaryButton, token: "test")
+
         XCTAssertEqual(resolved.backgroundColor, ThemeDefaults.primaryButton.backgroundColor)
+        XCTAssertEqual(resolved.font, UIFont.systemFont(ofSize: 16, weight: .regular))
     }
 
     func testTextStyleResolution() {

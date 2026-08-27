@@ -3,6 +3,49 @@ import os
 
 private let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
 
+/// Owns the mutable beacon state (cookie-flag accumulator and consent beacon
+/// counter) behind a serial queue, since beacon tasks run concurrently.
+enum BeaconState {
+    private static let queue = DispatchQueue(label: "com.cheq.CheqEnforce.BeaconState")
+    private static var count = 0
+    private static var flags: [String: Bool] = [:]
+
+    static var cookieFlags: [String: Bool] {
+        queue.sync { flags }
+    }
+
+    static func setCookieFlags(_ newFlags: [String: Bool]) {
+        queue.sync { flags = newFlags }
+    }
+
+    /// Merges incoming flags into the accumulator, persists it, and returns
+    /// the merged snapshot, all as one serialized step.
+    static func mergeAndPersistCookieFlags(_ incoming: [String: Bool]) -> [String: Bool] {
+        queue.sync {
+            for (key, value) in incoming {
+                flags[key] = value
+            }
+            ConsentStore.saveCookieFlags(flags)
+            return flags
+        }
+    }
+
+    static func billingBeaconIndex() -> Int {
+        queue.sync {
+            count = 1
+            return 0
+        }
+    }
+
+    static func nextConsentBeaconIndex() -> Int {
+        queue.sync {
+            let n = count
+            count += 1
+            return n
+        }
+    }
+}
+
 struct ConsentReporting {
     /// Public API: send a billing or consent beacon
     static func send(
@@ -17,11 +60,23 @@ struct ConsentReporting {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         let instanceId = Enforce.cachedInstanceId
         
+        // Consent beacons merge their flags into the persisted accumulator
+        // (so beacons after a relaunch still carry the full consent state);
+        // billing beacons just read it.
+        let accumulatedFlags: [String: Bool]
+        switch type {
+        case .billing:
+            accumulatedFlags = BeaconState.cookieFlags
+        case .consent:
+            accumulatedFlags = BeaconState.mergeAndPersistCookieFlags(cookieFlags)
+        }
+
         do {
             // Build the beacon model
             let beacon = makeBeacon(config: config,
                                     type: type,
                                     flags: cookieFlags,
+                                    accumulatedFlags: accumulatedFlags,
                                     timestamp: timestamp,
                                     instanceId: instanceId,
                                     clientId:    clientId,
@@ -70,6 +125,7 @@ struct ConsentReporting {
         config: Config,
         type: BeaconType,
         flags: [String: Bool],
+        accumulatedFlags: [String: Bool],
         timestamp: Int64,
         instanceId: String,
         clientId: String,
@@ -94,7 +150,7 @@ struct ConsentReporting {
             // Billing carries the accumulated consent state with raw keys
             // (category names and interaction flags, no client-name prefix)
             let cookies = Dictionary(uniqueKeysWithValues:
-                Enforce.storedCookieFlags.map { flag, enabled in (flag, enabled ? "1" : "0") }
+                accumulatedFlags.map { flag, enabled in (flag, enabled ? "1" : "0") }
             )
             return EnforceBeacon(
                 version: "1.0.0",
@@ -115,16 +171,8 @@ struct ConsentReporting {
             )
             
         case .consent:
-            // Merge incoming flags and persist the accumulator so beacons
-            // after a relaunch still carry the full consent state (restored
-            // in configure() while the consent record remains valid).
-            for (key, value) in flags {
-                Enforce.storedCookieFlags[key] = value
-            }
-            ConsentStore.saveCookieFlags(Enforce.storedCookieFlags)
-            // Build cookies dict
             let cookies = Dictionary(uniqueKeysWithValues:
-                                        Enforce.storedCookieFlags.map { flag, enabled in
+                                        accumulatedFlags.map { flag, enabled in
                 ("\(config.clientName.uppercased())_ENSIGHTEN_PRIVACY_\(flag)", enabled ? "1" : "0")
             }
             )
@@ -192,18 +240,16 @@ struct ConsentReporting {
         instanceId: String,
         clientId: String
     ) throws -> URL {
-        // Path prefix and beaconCount
+        // Path prefix and beacon index
         let pathPrefix: String
         let n: Int
         switch type {
         case .billing:
             pathPrefix = "b"
-            n = 0
-            Enforce.beaconCount = 1
+            n = BeaconState.billingBeaconIndex()
         case .consent:
             pathPrefix = "c"
-            n = Enforce.beaconCount
-            Enforce.beaconCount += 1
+            n = BeaconState.nextConsentBeaconIndex()
         }
         
         var comps = URLComponents()

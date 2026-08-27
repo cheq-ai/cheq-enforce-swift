@@ -96,7 +96,7 @@ public class CustomBannerViewController: UIViewController {
         containerView.addSubview(contentStack)
 
         if let logo {
-            contentStack.addArrangedSubview(makeLogoView(logo))
+            contentStack.addArrangedSubview(ThemeResolver.makeLogoView(logo, alignment: bannerTheme?.logoAlignment))
         }
 
         let descriptionLabel = UILabel()
@@ -208,56 +208,6 @@ public class CustomBannerViewController: UIViewController {
         style.apply(to: button)
         button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return button
-    }
-
-    /// Wraps the logo in a container so it can be aligned left/center/right/full.
-    private func makeLogoView(_ image: UIImage) -> UIView {
-        let wrapper = UIView()
-        let imageView = UIImageView(image: image)
-        imageView.contentMode = .scaleAspectFit
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        wrapper.addSubview(imageView)
-
-        var constraints = [
-            imageView.topAnchor.constraint(equalTo: wrapper.topAnchor),
-            imageView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 40)
-        ]
-
-        // Preferred, not required: an over-wide logo (aspect width exceeding the
-        // container) compresses to fit instead of conflicting with the edge
-        // constraints and overflowing the sheet.
-        let aspect = image.size.width / max(image.size.height, 1)
-        let aspectConstraint = imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor, multiplier: aspect)
-        aspectConstraint.priority = .defaultHigh
-
-        switch bannerTheme?.logoAlignment ?? .center {
-        case .left:
-            constraints += [
-                aspectConstraint,
-                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-                imageView.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor)
-            ]
-        case .center:
-            constraints += [
-                aspectConstraint,
-                imageView.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
-                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
-            ]
-        case .right:
-            constraints += [
-                aspectConstraint,
-                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-                imageView.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor)
-            ]
-        case .full:
-            constraints += [
-                imageView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-                imageView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
-            ]
-        }
-        NSLayoutConstraint.activate(constraints)
-        return wrapper
     }
 
     // MARK: - Actions (identical behavior to the alert banner)
