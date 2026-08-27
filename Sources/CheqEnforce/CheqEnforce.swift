@@ -43,6 +43,27 @@ public class Enforce {
     #endif
     
     static var lastResponse: JSONResponse?
+
+    /// The configured (non-override) environment's response, kept so
+    /// ``resetEnvironment()`` can restore it without a refetch.
+    static var configuredEnvironmentResponse: JSONResponse?
+
+    /// Adopts a fetched `environment.json` response only when `environment`
+    /// is still the effective one, so a fetch that was superseded mid-flight
+    /// (e.g. configure()'s fetch landing after setEnvironment()) cannot
+    /// clobber the current environment's response.
+    @discardableResult
+    static func adoptResponse(_ response: JSONResponse, for environment: String) -> Bool {
+        guard storedConfig?.environment == environment else {
+            log.info("Discarding fetched environment.json for “\(environment, privacy: .public)”; the effective environment is now “\(storedConfig?.environment ?? "none", privacy: .public)”.")
+            return false
+        }
+        lastResponse = response
+        if environment == configuredEnvironment {
+            configuredEnvironmentResponse = response
+        }
+        return true
+    }
     
     static var  cachedInstanceId: String = {
         return randomBase36InstanceId()
@@ -90,6 +111,7 @@ public class Enforce {
         // return to it, then apply a persisted setEnvironment() override
         // if one is still within its expiration.
         configuredEnvironment = config.environment
+        configuredEnvironmentResponse = nil
         let config = applyingStoredEnvironment(config)
 
         //Build environment.json URL from configuration values
@@ -113,8 +135,10 @@ public class Enforce {
             do {
                 let jsonData = try await TranslationService.fetchJSON(from: url, debug: config.debug)
                 let jsonResponse = try JSONDecoder().decode(JSONResponse.self, from: jsonData)
-                Self.lastResponse = jsonResponse
+                guard Self.adoptResponse(jsonResponse, for: config.environment) else { return }
                 log.info("Successfully decoded JSON file")
+
+                ConsentStore.migrateTitleKeyedConsent(cookies: jsonResponse.translation.cookies)
                 
                 //Send Load beacon
                 guard let resp = lastResponse else { return }
@@ -309,6 +333,32 @@ public class Enforce {
         }
         storedConfig = replacingEnvironment(of: currentConfig, with: original)
         log.info("resetEnvironment(): environment reverted to configured “\(original, privacy: .public)”.")
+
+        // Restore the configured environment's response so getConfiguration()
+        // and beacons don't keep serving the abandoned override's document.
+        // Without a snapshot (override active since launch), drop the stale
+        // response and refetch in the background.
+        if let snapshot = configuredEnvironmentResponse {
+            lastResponse = snapshot
+        } else if let config = storedConfig {
+            lastResponse = nil
+            refetchResponse(for: config)
+        }
+    }
+
+    /// Fetches and adopts `environment.json` for the given config in the
+    /// background; a response for a since-superseded environment is discarded.
+    private static func refetchResponse(for config: Config) {
+        guard let url = TranslationService.buildURL(config: config) else { return }
+        Task {
+            do {
+                let data = try await TranslationService.fetchJSON(from: url, debug: config.debug)
+                let response = try JSONDecoder().decode(JSONResponse.self, from: data)
+                adoptResponse(response, for: config.environment)
+            } catch {
+                log.error("Failed to refetch environment.json for “\(config.environment, privacy: .public)”: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// The environment passed to `configure(_:)`, before any stored
@@ -431,7 +481,7 @@ public class Enforce {
             // environment's response, and persist the override so future
             // launches keep this environment (until consent expires).
             storedConfig = updatedConfig
-            Enforce.lastResponse = response
+            Enforce.adoptResponse(response, for: environment)
             ConsentStore.saveEnvironmentOverride(environment)
             log.info("Environment updated to: \(environment, privacy: .public)")
         } catch {

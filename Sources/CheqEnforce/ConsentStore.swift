@@ -140,6 +140,34 @@ struct ConsentStore {
         return UserDefaults.standard.dictionary(forKey: cookieFlagsKey) as? [String: Bool] ?? [:]
     }
 
+    /// One-time migration for consent records written by versions whose modal
+    /// keyed consent by display title instead of category key: a stored key
+    /// that is not a known category key but uniquely matches a category's
+    /// title is rewritten to that category's key. Ambiguous titles (shared by
+    /// several categories) are left untouched, and an existing key-keyed
+    /// entry is never overwritten.
+    static func migrateTitleKeyedConsent(cookies: [String: CookieDetails]?) {
+        guard let cookies, !cookies.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        guard let stored = defaults.dictionary(forKey: dataKey) as? [String: Bool] else { return }
+
+        var migrated = stored
+        for (storedKey, value) in stored {
+            guard cookies[storedKey] == nil else { continue }
+            let matchingKeys = cookies.compactMap { key, details in
+                details.title == storedKey ? key : nil
+            }
+            guard matchingKeys.count == 1, let key = matchingKeys.first else { continue }
+            if migrated[key] == nil {
+                migrated[key] = value
+            }
+            migrated.removeValue(forKey: storedKey)
+        }
+
+        guard migrated != stored else { return }
+        defaults.set(migrated, forKey: dataKey)
+    }
+
     /// Persist the environment set via `setEnvironment()` so it can override
     /// the configured environment on future launches. The override carries
     /// its own expiration: initially the consent expiration in effect when

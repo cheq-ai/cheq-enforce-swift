@@ -67,6 +67,41 @@ final class ModalConsentKeyingTests: XCTestCase {
                        "Toggle seeding must read consent by category key, not display title")
     }
 
+    func testMigrationRewritesTitleKeyedConsentToCategoryKey() {
+        ConsentStore.save(["Analytique": true, "marketing": false], version: "1", expirationMilliseconds: 60_000)
+
+        ConsentStore.migrateTitleKeyedConsent(cookies: [
+            "analytics": CookieDetails(title: "Analytique", description: "d"),
+            "marketing": CookieDetails(title: "Commercialisation", description: "d")
+        ])
+
+        XCTAssertEqual(ConsentStore.getAll(), ["analytics": true, "marketing": false],
+                       "A title-keyed record must be rewritten to its category key")
+    }
+
+    func testMigrationLeavesAmbiguousTitlesUntouched() {
+        ConsentStore.save(["Tracking": true], version: "1", expirationMilliseconds: 60_000)
+
+        ConsentStore.migrateTitleKeyedConsent(cookies: [
+            "analytics": CookieDetails(title: "Tracking", description: "d"),
+            "marketing": CookieDetails(title: "Tracking", description: "d")
+        ])
+
+        XCTAssertEqual(ConsentStore.getAll(), ["Tracking": true],
+                       "A title shared by several categories cannot be migrated safely")
+    }
+
+    func testMigrationNeverOverwritesKeyKeyedEntry() {
+        ConsentStore.save(["analytics": false, "Analytique": true], version: "1", expirationMilliseconds: 60_000)
+
+        ConsentStore.migrateTitleKeyedConsent(cookies: [
+            "analytics": CookieDetails(title: "Analytique", description: "d")
+        ])
+
+        XCTAssertEqual(ConsentStore.getAll(), ["analytics": false],
+                       "An existing key-keyed entry wins over a legacy title-keyed one")
+    }
+
     @MainActor
     func testTogglesUnseededWhenConsentStoredUnderTitle() {
         // Consent stored under the display title must NOT seed the toggle;

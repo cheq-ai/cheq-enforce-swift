@@ -21,6 +21,8 @@ final class EnvironmentOverrideTests: XCTestCase {
 
     override func tearDown() {
         wipeStore()
+        Enforce.lastResponse = nil
+        Enforce.configuredEnvironmentResponse = nil
         super.tearDown()
     }
 
@@ -31,6 +33,32 @@ final class EnvironmentOverrideTests: XCTestCase {
         defaults.removeObject(forKey: versionKey)
         defaults.removeObject(forKey: environmentKey)
         defaults.removeObject(forKey: environmentExpiryKey)
+    }
+
+    private func makeResponse(clientId: String) -> JSONResponse {
+        JSONResponse(
+            clientId: clientId,
+            version: "1",
+            enforcement: false,
+            enablePrivacyNotice: false,
+            enableConsentModal: false,
+            translation: Translation(
+                notificationBannerContent: nil,
+                notificationBannerAllowAll: nil,
+                notificationBannerDenyAll: nil,
+                notificationBannerPreferences: nil,
+                consentTitle: nil,
+                consentDescription: nil,
+                consentModalAllowAll: nil,
+                consentModalDenyAll: nil,
+                save: nil,
+                cancel: nil,
+                close: nil,
+                cookies: nil
+            ),
+            bannerConfig: nil,
+            consentModalConfig: nil
+        )
     }
 
     private func makeConfig(environment: String = "English", version: String = "1") -> Config {
@@ -271,6 +299,60 @@ final class EnvironmentOverrideTests: XCTestCase {
                        "setEnvironment must adopt the fetched response so getConfiguration() reflects the new environment")
         XCTAssertEqual(Enforce.getConfiguration()?.version, "9")
         XCTAssertEqual(ConsentStore.validEnvironmentOverride(), "French")
+    }
+
+    // MARK: - lastResponse ownership across environment switches
+
+    func testAdoptResponseDiscardsSupersededEnvironment() {
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.lastResponse = nil
+
+        XCTAssertFalse(Enforce.adoptResponse(makeResponse(clientId: "english"), for: "English"),
+                       "A response fetched for a no-longer-effective environment must be discarded")
+        XCTAssertNil(Enforce.lastResponse)
+
+        XCTAssertTrue(Enforce.adoptResponse(makeResponse(clientId: "french"), for: "French"))
+        XCTAssertEqual(Enforce.lastResponse?.clientId, "french")
+    }
+
+    func testResetEnvironmentRestoresConfiguredEnvironmentsResponse() async throws {
+        Enforce.configuredEnvironment = "English"
+        Enforce.storedConfig = makeConfig(environment: "English")
+        Enforce.adoptResponse(makeResponse(clientId: "englishClient"), for: "English")
+
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        defer {
+            TranslationService._testProtocolClasses = nil
+            URLProtocolMock.reset()
+        }
+        URLProtocolMock.responder = { _ in
+            let json = """
+            {"clientId":"frenchClient","version":"2","enforcement":false,
+             "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
+            """
+            return (200, Data(json.utf8))
+        }
+        try await Enforce.setEnvironment("French")
+        XCTAssertEqual(Enforce.lastResponse?.clientId, "frenchClient")
+
+        Enforce.resetEnvironment()
+
+        XCTAssertEqual(Enforce.getEnvironment(), "English")
+        XCTAssertEqual(Enforce.lastResponse?.clientId, "englishClient",
+                       "resetEnvironment must restore the configured environment's response")
+    }
+
+    func testResetEnvironmentWithoutSnapshotDropsStaleResponse() {
+        Enforce.configuredEnvironment = "English"
+        Enforce.configuredEnvironmentResponse = nil
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.lastResponse = makeResponse(clientId: "frenchClient")
+
+        Enforce.resetEnvironment()
+
+        XCTAssertEqual(Enforce.getEnvironment(), "English")
+        XCTAssertNil(Enforce.lastResponse,
+                     "The abandoned environment's response must not survive resetEnvironment")
     }
 
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
