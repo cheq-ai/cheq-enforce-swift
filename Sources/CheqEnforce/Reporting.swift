@@ -30,6 +30,18 @@ enum BeaconState {
         }
     }
 
+    /// Applies `rename` to the accumulator and persists the result as one
+    /// serialized step, so a concurrent merge can't resurrect old keys or
+    /// lose its own flags.
+    static func renameCookieFlags(_ rename: ([String: Bool]) -> [String: Bool]) {
+        queue.sync {
+            let renamed = rename(flags)
+            guard renamed != flags else { return }
+            flags = renamed
+            ConsentStore.saveCookieFlags(flags)
+        }
+    }
+
     static func billingBeaconIndex() -> Int {
         queue.sync {
             count = 1

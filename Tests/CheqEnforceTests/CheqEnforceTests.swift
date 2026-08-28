@@ -176,6 +176,42 @@ final class EnforceTests: XCTestCase {
                    "configure() must deliver stored consent to handlers registered before it")
   }
 
+  func testOnConsentRefiresWithMigratedKeysAfterConfigureFetch() {
+    // Legacy record keyed by display title, as a 0.1.x modal wrote it.
+    ConsentStore.save(["Analytique": true], version: "1", expirationMilliseconds: 60_000)
+
+    TranslationService._testProtocolClasses = [URLProtocolMock.self]
+    URLProtocol.registerClass(URLProtocolMock.self)   // capture beacons too
+    defer {
+      TranslationService._testProtocolClasses = nil
+      URLProtocol.unregisterClass(URLProtocolMock.self)
+      URLProtocolMock.reset()
+      Enforce.lastResponse = nil
+    }
+    URLProtocolMock.responder = { request in
+      guard request.url?.path.contains("environment.json") == true else { return (204, Data()) }
+      let json = """
+      {"clientId":"client","version":"1","enforcement":false,
+       "enablePrivacyNotice":false,"enableConsentModal":false,
+       "translation":{"cookies":{"analytics":{"title":"Analytique","description":"d"}}}}
+      """
+      return (200, Data(json.utf8))
+    }
+
+    let exp = expectation(description: "handler re-fired with migrated keys")
+    exp.assertForOverFulfill = false
+    Enforce.onConsent { consent in
+      if consent == ["analytics": true] {
+        exp.fulfill()
+      }
+    }
+
+    Enforce.configure(Config("testClient", publishPath: "testPath", environment: "testEnv", autoShow: false, version: "1"))
+
+    wait(for: [exp], timeout: 2.0)
+    XCTAssertEqual(Enforce.getConsent(), ["analytics": true])
+  }
+
   func testClearConsentRemovesStoredData() async {
     // seed some stored consent
     Enforce.setConsent(["Analytics": true, "Marketing": true])

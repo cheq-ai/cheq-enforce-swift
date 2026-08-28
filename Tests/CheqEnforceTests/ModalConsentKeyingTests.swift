@@ -6,9 +6,10 @@ import XCTest
 /// display title, which may be localized and differ from the key.
 final class ModalConsentKeyingTests: XCTestCase {
 
-    private let dataKey    = "cheqEnforceConsentData"
-    private let expiryKey  = "cheqEnforceConsentExpirationTime"
-    private let versionKey = "cheqEnforceConsentVersion"
+    private let dataKey        = "cheqEnforceConsentData"
+    private let expiryKey      = "cheqEnforceConsentExpirationTime"
+    private let versionKey     = "cheqEnforceConsentVersion"
+    private let cookieFlagsKey = "cheqEnforceBeaconCookieFlags"
 
     override func setUp() {
         super.setUp()
@@ -26,6 +27,8 @@ final class ModalConsentKeyingTests: XCTestCase {
         defaults.removeObject(forKey: dataKey)
         defaults.removeObject(forKey: expiryKey)
         defaults.removeObject(forKey: versionKey)
+        defaults.removeObject(forKey: cookieFlagsKey)
+        Enforce.storedCookieFlags = [:]
     }
 
     @MainActor
@@ -89,6 +92,32 @@ final class ModalConsentKeyingTests: XCTestCase {
 
         XCTAssertEqual(ConsentStore.getAll(), ["Tracking": true],
                        "A title shared by several categories cannot be migrated safely")
+    }
+
+    func testMigrationAlsoRewritesBeaconCookieFlags() {
+        ConsentStore.save(["Analytique": true], version: "1", expirationMilliseconds: 60_000)
+        ConsentStore.saveCookieFlags(["Analytique": true, "BANNER_VIEWED": true])
+        Enforce.storedCookieFlags = ["Analytique": true, "BANNER_VIEWED": true]
+
+        let changed = ConsentStore.migrateTitleKeyedConsent(cookies: [
+            "analytics": CookieDetails(title: "Analytique", description: "d")
+        ])
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(ConsentStore.cookieFlags(), ["analytics": true, "BANNER_VIEWED": true],
+                       "The persisted cookie-flag accumulator must be migrated with the consent record")
+        XCTAssertEqual(Enforce.storedCookieFlags, ["analytics": true, "BANNER_VIEWED": true],
+                       "The in-memory accumulator must be re-seeded after migration")
+    }
+
+    func testMigrationReturnsFalseWhenNothingToMigrate() {
+        ConsentStore.save(["analytics": true], version: "1", expirationMilliseconds: 60_000)
+
+        let changed = ConsentStore.migrateTitleKeyedConsent(cookies: [
+            "analytics": CookieDetails(title: "Analytique", description: "d")
+        ])
+
+        XCTAssertFalse(changed)
     }
 
     func testMigrationNeverOverwritesKeyKeyedEntry() {

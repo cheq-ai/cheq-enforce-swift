@@ -141,31 +141,48 @@ struct ConsentStore {
     }
 
     /// One-time migration for consent records written by versions whose modal
-    /// keyed consent by display title instead of category key: a stored key
-    /// that is not a known category key but uniquely matches a category's
-    /// title is rewritten to that category's key. Ambiguous titles (shared by
+    /// keyed consent by display title instead of category key, applied to the
+    /// consent record and the beacon cookie-flag accumulator (persisted and
+    /// in-memory).
+    /// - Returns: `true` when the consent record changed, so callers can
+    ///   re-notify onConsent subscribers that received pre-migration keys.
+    @discardableResult
+    static func migrateTitleKeyedConsent(cookies: [String: CookieDetails]?) -> Bool {
+        guard let cookies, !cookies.isEmpty else { return false }
+        let defaults = UserDefaults.standard
+
+        var consentChanged = false
+        if let stored = defaults.dictionary(forKey: dataKey) as? [String: Bool] {
+            let migrated = renamingTitleKeys(in: stored, using: cookies)
+            if migrated != stored {
+                defaults.set(migrated, forKey: dataKey)
+                consentChanged = true
+            }
+        }
+
+        BeaconState.renameCookieFlags { renamingTitleKeys(in: $0, using: cookies) }
+
+        return consentChanged
+    }
+
+    /// Rewrites keys that are not category keys but uniquely match a
+    /// category's title to that category's key. Ambiguous titles (shared by
     /// several categories) are left untouched, and an existing key-keyed
     /// entry is never overwritten.
-    static func migrateTitleKeyedConsent(cookies: [String: CookieDetails]?) {
-        guard let cookies, !cookies.isEmpty else { return }
-        let defaults = UserDefaults.standard
-        guard let stored = defaults.dictionary(forKey: dataKey) as? [String: Bool] else { return }
-
-        var migrated = stored
-        for (storedKey, value) in stored {
+    private static func renamingTitleKeys(in record: [String: Bool], using cookies: [String: CookieDetails]) -> [String: Bool] {
+        var renamed = record
+        for (storedKey, value) in record {
             guard cookies[storedKey] == nil else { continue }
             let matchingKeys = cookies.compactMap { key, details in
                 details.title == storedKey ? key : nil
             }
             guard matchingKeys.count == 1, let key = matchingKeys.first else { continue }
-            if migrated[key] == nil {
-                migrated[key] = value
+            if renamed[key] == nil {
+                renamed[key] = value
             }
-            migrated.removeValue(forKey: storedKey)
+            renamed.removeValue(forKey: storedKey)
         }
-
-        guard migrated != stored else { return }
-        defaults.set(migrated, forKey: dataKey)
+        return renamed
     }
 
     /// Persist the environment set via `setEnvironment()` so it can override

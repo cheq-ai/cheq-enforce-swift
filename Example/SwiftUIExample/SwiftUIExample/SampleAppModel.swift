@@ -48,10 +48,14 @@ final class SampleAppModel {
     var setConsentResult: ActionResult?
     var configurationResult: ActionResult?
 
-    /// The environment currently applied to the SDK. Passed through when
-    /// reconfiguring, otherwise configure() would revert an environment
-    /// previously changed via setEnvironment().
-    private(set) var currentEnvironment = "English"
+    /// The environment this app configures. setEnvironment() overrides are
+    /// persisted and re-applied by the SDK itself, so reconfigurations always
+    /// pass this fixed value and resetEnvironment() can revert to it.
+    private static let configuredEnvironment = "English"
+
+    /// The effective environment (configured value or active override),
+    /// synced from the SDK for display.
+    private(set) var currentEnvironment = configuredEnvironment
 
     private static let maxLogEntries = 200
 
@@ -113,11 +117,11 @@ final class SampleAppModel {
     /// banner styles can be exercised. Reconfigurations use autoShow: false
     /// so the UI only appears when Show Banner / Show Modal is tapped.
     func configure(themed: Bool, choice: SampleThemeChoice, autoShow: Bool = false) {
-        log("configure() called (theme: \(themed ? choice.rawValue : "none"), environment: \(currentEnvironment))")
+        log("configure() called (theme: \(themed ? choice.rawValue : "none"), environment: \(Self.configuredEnvironment))")
         Enforce.configure(Config(
             "demoretail",
             publishPath: "mobile_privacy_sdk",
-            environment: currentEnvironment,
+            environment: Self.configuredEnvironment,
             debug: true,
             dataRetentionPeriod: 60000,
             autoShow: autoShow,

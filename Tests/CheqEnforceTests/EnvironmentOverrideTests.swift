@@ -342,7 +342,20 @@ final class EnvironmentOverrideTests: XCTestCase {
                        "resetEnvironment must restore the configured environment's response")
     }
 
-    func testResetEnvironmentWithoutSnapshotDropsStaleResponse() {
+    func testResetEnvironmentWithoutSnapshotKeepsResponseUntilRefetchAdopts() {
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        defer {
+            TranslationService._testProtocolClasses = nil
+            URLProtocolMock.reset()
+        }
+        URLProtocolMock.responder = { _ in
+            let json = """
+            {"clientId":"englishClient","version":"3","enforcement":false,
+             "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
+            """
+            return (200, Data(json.utf8))
+        }
+
         Enforce.configuredEnvironment = "English"
         Enforce.configuredEnvironmentResponse = nil
         Enforce.storedConfig = makeConfig(environment: "French")
@@ -351,8 +364,18 @@ final class EnvironmentOverrideTests: XCTestCase {
         Enforce.resetEnvironment()
 
         XCTAssertEqual(Enforce.getEnvironment(), "English")
-        XCTAssertNil(Enforce.lastResponse,
-                     "The abandoned environment's response must not survive resetEnvironment")
+        // Beacons are gated on lastResponse, so it must never be nil here:
+        // the override's response stays until the refetch replaces it.
+        XCTAssertNotNil(Enforce.lastResponse)
+
+        let exp = expectation(description: "refetch adopts the configured environment's response")
+        Task {
+            while Enforce.lastResponse?.clientId != "englishClient" {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 2.0)
     }
 
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {

@@ -16,8 +16,19 @@ public class Enforce {
     /// signature for consent-change callbacks
     public typealias ConsentChangeHandler = ([String: Bool]) -> Void
 
-    /// all user-registered onConsent() closures
+    /// all user-registered onConsent() closures; guarded by
+    /// `consentHandlersQueue` since notification also runs from async tasks
     private static var consentHandlers: [ConsentChangeHandler] = []
+    private static let consentHandlersQueue = DispatchQueue(label: "com.cheq.CheqEnforce.consentHandlers")
+
+    /// Invokes every registered handler with `consent`, on a snapshot of the
+    /// handler list so concurrent registration can't race the iteration.
+    private static func notifyConsentHandlers(_ consent: [String: Bool]) {
+        let handlers = consentHandlersQueue.sync { consentHandlers }
+        for handler in handlers {
+            handler(consent)
+        }
+    }
 
     /// register a callback to run *every* time consent is updated
     ///
@@ -26,7 +37,7 @@ public class Enforce {
     /// before or after ``configure(_:)`` behaves the same.
     /// - Parameter handler: receives the *current* full consent dictionary
     public static func onConsent(_ handler: @escaping ConsentChangeHandler) {
-        consentHandlers.append(handler)
+        consentHandlersQueue.sync { consentHandlers.append(handler) }
         if storedConfig != nil {
             let current = getConsent()
             if !current.isEmpty {
@@ -38,7 +49,7 @@ public class Enforce {
     #if DEBUG
     /// Clears all registered onConsent handlers. Only for tests.
     internal static func _resetConsentHandlers() {
-        consentHandlers.removeAll()
+        consentHandlersQueue.sync { consentHandlers.removeAll() }
     }
     #endif
     
@@ -49,9 +60,7 @@ public class Enforce {
     static var configuredEnvironmentResponse: JSONResponse?
 
     /// Adopts a fetched `environment.json` response only when `environment`
-    /// is still the effective one, so a fetch that was superseded mid-flight
-    /// (e.g. configure()'s fetch landing after setEnvironment()) cannot
-    /// clobber the current environment's response.
+    /// is still the effective one; superseded fetches are discarded.
     @discardableResult
     static func adoptResponse(_ response: JSONResponse, for environment: String) -> Bool {
         guard storedConfig?.environment == environment else {
@@ -125,9 +134,7 @@ public class Enforce {
         // map is reserved for clearConsent()'s "consent revoked" signal.
         let latest = getConsent()
         if !latest.isEmpty {
-            for handler in consentHandlers {
-                handler(latest)
-            }
+            notifyConsentHandlers(latest)
         }
 
         //Get translations and show banner or modal
@@ -135,15 +142,24 @@ public class Enforce {
             do {
                 let jsonData = try await TranslationService.fetchJSON(from: url, debug: config.debug)
                 let jsonResponse = try JSONDecoder().decode(JSONResponse.self, from: jsonData)
-                guard Self.adoptResponse(jsonResponse, for: config.environment) else { return }
+                // If superseded by setEnvironment(), continue the launch flow
+                // (billing beacon, initial UI) on the now-effective response.
+                let adopted = Self.adoptResponse(jsonResponse, for: config.environment)
+                guard let response = adopted ? jsonResponse : Self.lastResponse else { return }
+                let effectiveConfig = Self.storedConfig ?? config
                 log.info("Successfully decoded JSON file")
 
-                ConsentStore.migrateTitleKeyedConsent(cookies: jsonResponse.translation.cookies)
-                
+                if ConsentStore.migrateTitleKeyedConsent(cookies: response.translation.cookies) {
+                    // Re-notify subscribers that received pre-migration keys.
+                    let migrated = getConsent()
+                    if !migrated.isEmpty {
+                        notifyConsentHandlers(migrated)
+                    }
+                }
+
                 //Send Load beacon
-                guard let resp = lastResponse else { return }
                 Task {
-                    await ConsentReporting.send(config: config, type: .billing, clientId: resp.clientId, version: resp.version, enforcement: resp.enforcement)
+                    await ConsentReporting.send(config: effectiveConfig, type: .billing, clientId: response.clientId, version: response.version, enforcement: response.enforcement)
                 }
                 
                 //If consent was found at the session boundary, do nothing further.
@@ -156,33 +172,33 @@ public class Enforce {
                 }
                 
                 // If autoShow is false, do nothing further
-                guard config.autoShow else {
+                guard effectiveConfig.autoShow else {
                     log.info("autoShow is false; skipping initial UI display.")
                     return
                 }
-                
+
                 //Show banner or modal
-                if jsonResponse.enablePrivacyNotice {
-                    guard let bannerConfig = jsonResponse.bannerConfig else {
+                if response.enablePrivacyNotice {
+                    guard let bannerConfig = response.bannerConfig else {
                         log.error("Cannot show banner: Banner on but no banner config found")
                         Task {
-                            _ = await ErrorReporting.sendError(msg: "Cannot show banner: Banner on but no banner config found", fn: #function, clientId: resp.clientId, config: config)
+                            _ = await ErrorReporting.sendError(msg: "Cannot show banner: Banner on but no banner config found", fn: #function, clientId: response.clientId, config: effectiveConfig)
                         }
                         return
                     }
                     BannerPresenter.show(
-                        translation: jsonResponse.translation,
+                        translation: response.translation,
                         bannerConfig: bannerConfig,
-                        consentModalConfig: jsonResponse.consentModalConfig ?? ConsentModalConfig(ensConsentAcceptAll: nil, ensConsentRejectAll: nil, ensSaveModal: nil, ensCloseModal: nil),
-                        config: config,
+                        consentModalConfig: response.consentModalConfig ?? ConsentModalConfig(ensConsentAcceptAll: nil, ensConsentRejectAll: nil, ensSaveModal: nil, ensCloseModal: nil),
+                        config: effectiveConfig,
                         delay: 1.0
                     )
-                } else if jsonResponse.enableConsentModal {
+                } else if response.enableConsentModal {
                     log.info("No Banner found. Opening Modal")
                     ModalPresenter.show(
-                        translation: jsonResponse.translation,
-                        consentModalConfig: jsonResponse.consentModalConfig ?? ConsentModalConfig(ensConsentAcceptAll: nil, ensConsentRejectAll: nil, ensSaveModal: nil, ensCloseModal: nil),
-                        config: config,
+                        translation: response.translation,
+                        consentModalConfig: response.consentModalConfig ?? ConsentModalConfig(ensConsentAcceptAll: nil, ensConsentRejectAll: nil, ensSaveModal: nil, ensCloseModal: nil),
+                        config: effectiveConfig,
                         delay: 1.0
                     )
 
@@ -264,10 +280,7 @@ public class Enforce {
         )
         
         //Trigger consent callbacks
-        let latest = getConsent()
-        for handler in consentHandlers {
-            handler(latest)
-        }
+        notifyConsentHandlers(getConsent())
         
         guard let resp = Enforce.lastResponse else { return }
         var reportFlags = consent
@@ -297,9 +310,7 @@ public class Enforce {
         storedCookieFlags = [:]
 
         // Notify onConsent subscribers that consent is now absent.
-        for handler in consentHandlers {
-            handler([:])
-        }
+        notifyConsentHandlers([:])
 
         // Dismiss any currently visible consent banner or modal.
         await MainActor.run {
@@ -331,18 +342,17 @@ public class Enforce {
             log.info("resetEnvironment(): already using the configured environment.")
             return
         }
-        storedConfig = replacingEnvironment(of: currentConfig, with: original)
+        let revertedConfig = replacingEnvironment(of: currentConfig, with: original)
+        storedConfig = revertedConfig
         log.info("resetEnvironment(): environment reverted to configured “\(original, privacy: .public)”.")
 
-        // Restore the configured environment's response so getConfiguration()
-        // and beacons don't keep serving the abandoned override's document.
-        // Without a snapshot (override active since launch), drop the stale
-        // response and refetch in the background.
+        // Restore the configured environment's response, or refetch it.
+        // The override's response stays until a replacement is adopted:
+        // beacons are gated on lastResponse, so nilling it drops consent.
         if let snapshot = configuredEnvironmentResponse {
-            lastResponse = snapshot
-        } else if let config = storedConfig {
-            lastResponse = nil
-            refetchResponse(for: config)
+            adoptResponse(snapshot, for: original)
+        } else {
+            refetchResponse(for: revertedConfig)
         }
     }
 
@@ -357,6 +367,9 @@ public class Enforce {
                 adoptResponse(response, for: config.environment)
             } catch {
                 log.error("Failed to refetch environment.json for “\(config.environment, privacy: .public)”: \(error.localizedDescription, privacy: .public)")
+                Task {
+                    _ = await ErrorReporting.sendError(msg: "Failed to refetch environment.json after resetEnvironment", fn: #function, config: config)
+                }
             }
         }
     }
