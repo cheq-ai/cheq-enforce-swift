@@ -4,7 +4,20 @@ import UIKit
 
 public class Enforce {
     static internal let log = Logger(subsystem: "Cheq", category: "CheqEnforce")
-    static var storedConfig: Config?
+
+    /// Serializes the environment-related statics below, which are written
+    /// from several concurrent tasks and read from integrator threads.
+    private static let stateQueue = DispatchQueue(label: "com.cheq.CheqEnforce.state")
+    private static var _storedConfig: Config?
+    private static var _lastResponse: JSONResponse?
+    private static var _configuredEnvironmentResponse: JSONResponse?
+    private static var _configuredEnvironment: String?
+    private static var _revertPending = false
+
+    static var storedConfig: Config? {
+        get { stateQueue.sync { _storedConfig } }
+        set { stateQueue.sync { _storedConfig = newValue } }
+    }
 
     /// The currently presented consent banner (alert or themed bottom sheet),
     /// if any. Tracked so it can be dismissed by `clearConsent()`.
@@ -53,25 +66,68 @@ public class Enforce {
     }
     #endif
     
-    static var lastResponse: JSONResponse?
+    static var lastResponse: JSONResponse? {
+        get { stateQueue.sync { _lastResponse } }
+        set { stateQueue.sync { _lastResponse = newValue } }
+    }
 
     /// The configured (non-override) environment's response, kept so
     /// ``resetEnvironment()`` can restore it without a refetch.
-    static var configuredEnvironmentResponse: JSONResponse?
+    static var configuredEnvironmentResponse: JSONResponse? {
+        get { stateQueue.sync { _configuredEnvironmentResponse } }
+        set { stateQueue.sync { _configuredEnvironmentResponse = newValue } }
+    }
+
+    /// Whether a resetEnvironment() revert is still waiting for its refetch.
+    /// While set, getConfiguration() reports nil instead of the abandoned
+    /// environment's document; beacons keep using lastResponse.
+    static var revertPending: Bool {
+        get { stateQueue.sync { _revertPending } }
+        set { stateQueue.sync { _revertPending = newValue } }
+    }
+
+    /// Adopt logic shared by the synchronized entry points below.
+    /// Must only be called on `stateQueue`.
+    private static func _adopt(_ response: JSONResponse, for environment: String) -> Bool {
+        guard _storedConfig?.environment == environment else {
+            log.info("Discarding fetched environment.json for “\(environment, privacy: .public)”; the effective environment is now “\(_storedConfig?.environment ?? "none", privacy: .public)”.")
+            return false
+        }
+        _lastResponse = response
+        _revertPending = false
+        if environment == _configuredEnvironment {
+            _configuredEnvironmentResponse = response
+        }
+        return true
+    }
 
     /// Adopts a fetched `environment.json` response only when `environment`
     /// is still the effective one; superseded fetches are discarded.
     @discardableResult
     static func adoptResponse(_ response: JSONResponse, for environment: String) -> Bool {
-        guard storedConfig?.environment == environment else {
-            log.info("Discarding fetched environment.json for “\(environment, privacy: .public)”; the effective environment is now “\(storedConfig?.environment ?? "none", privacy: .public)”.")
-            return false
+        stateQueue.sync { _adopt(response, for: environment) }
+    }
+
+    /// Adopts the fetch (or falls back to the already-effective response when
+    /// superseded) and returns the response/config pair the launch flow
+    /// should use, as one atomic read.
+    static func adoptResponseForLaunch(_ response: JSONResponse, for environment: String) -> (response: JSONResponse, config: Config)? {
+        stateQueue.sync {
+            let adopted = _adopt(response, for: environment)
+            guard let effective = adopted ? response : _lastResponse,
+                  let config = _storedConfig else { return nil }
+            return (effective, config)
         }
-        lastResponse = response
-        if environment == configuredEnvironment {
-            configuredEnvironmentResponse = response
+    }
+
+    /// Atomically installs an environment switch: the new config and its
+    /// freshly fetched response together, so readers can't observe one
+    /// without the other.
+    static func adoptEnvironmentSwitch(config: Config, response: JSONResponse) {
+        stateQueue.sync {
+            _storedConfig = config
+            _ = _adopt(response, for: config.environment)
         }
-        return true
     }
     
     static var  cachedInstanceId: String = {
@@ -144,9 +200,7 @@ public class Enforce {
                 let jsonResponse = try JSONDecoder().decode(JSONResponse.self, from: jsonData)
                 // If superseded by setEnvironment(), continue the launch flow
                 // (billing beacon, initial UI) on the now-effective response.
-                let adopted = Self.adoptResponse(jsonResponse, for: config.environment)
-                guard let response = adopted ? jsonResponse : Self.lastResponse else { return }
-                let effectiveConfig = Self.storedConfig ?? config
+                guard let (response, effectiveConfig) = Self.adoptResponseForLaunch(jsonResponse, for: config.environment) else { return }
                 log.info("Successfully decoded JSON file")
 
                 if ConsentStore.migrateTitleKeyedConsent(cookies: response.translation.cookies) {
@@ -251,10 +305,14 @@ public class Enforce {
     /// customer can implement their own consent experience.
     ///
     /// - Returns: the configuration, or `nil` if ``configure(_:)`` has not
-    ///   yet completed its asynchronous fetch.
+    ///   yet completed its asynchronous fetch, or while a
+    ///   ``resetEnvironment()`` revert is still waiting for its refetch.
     public static func getConfiguration() -> EnforceConfiguration? {
-        guard let resp = lastResponse else { return nil }
-        return EnforceConfiguration(from: resp)
+        let response: JSONResponse? = stateQueue.sync {
+            _revertPending ? nil : _lastResponse
+        }
+        guard let response else { return nil }
+        return EnforceConfiguration(from: response)
     }
 
     /// Overwrite (or merge) one or more consent categories.
@@ -334,41 +392,65 @@ public class Enforce {
     public static func resetEnvironment() {
         ConsentStore.clearEnvironmentOverride()
 
-        guard let currentConfig = storedConfig else {
-            log.info("resetEnvironment(): no stored config; nothing to reset.")
-            return
-        }
-        guard let original = configuredEnvironment, original != currentConfig.environment else {
-            log.info("resetEnvironment(): already using the configured environment.")
-            return
-        }
-        let revertedConfig = replacingEnvironment(of: currentConfig, with: original)
-        storedConfig = revertedConfig
-        log.info("resetEnvironment(): environment reverted to configured “\(original, privacy: .public)”.")
+        // The revert is one atomic state transition. The override's response
+        // stays until a replacement is adopted (beacons are gated on
+        // lastResponse, so nilling it drops consent); while the refetch is
+        // pending, getConfiguration() reports nil instead of the abandoned
+        // document.
+        let refetchConfig: Config? = stateQueue.sync {
+            guard let currentConfig = _storedConfig else {
+                log.info("resetEnvironment(): no stored config; nothing to reset.")
+                return nil
+            }
+            guard let original = _configuredEnvironment, original != currentConfig.environment else {
+                log.info("resetEnvironment(): already using the configured environment.")
+                return nil
+            }
+            let revertedConfig = replacingEnvironment(of: currentConfig, with: original)
+            _storedConfig = revertedConfig
+            log.info("resetEnvironment(): environment reverted to configured “\(original, privacy: .public)”.")
 
-        // Restore the configured environment's response, or refetch it.
-        // The override's response stays until a replacement is adopted:
-        // beacons are gated on lastResponse, so nilling it drops consent.
-        if let snapshot = configuredEnvironmentResponse {
-            adoptResponse(snapshot, for: original)
-        } else {
-            refetchResponse(for: revertedConfig)
+            if let snapshot = _configuredEnvironmentResponse {
+                _ = _adopt(snapshot, for: original)
+                return nil
+            }
+            _revertPending = true
+            return revertedConfig
+        }
+        if let refetchConfig {
+            refetchResponse(for: refetchConfig)
         }
     }
 
+    private static let refetchAttempts = 3
+    #if DEBUG
+    /// Test hook: delay between refetch retries. Only for tests.
+    static var _refetchRetryDelay: TimeInterval = 2
+    #else
+    private static let _refetchRetryDelay: TimeInterval = 2
+    #endif
+
     /// Fetches and adopts `environment.json` for the given config in the
-    /// background; a response for a since-superseded environment is discarded.
+    /// background, retrying a bounded number of times; a response for a
+    /// since-superseded environment is discarded and ends the attempts.
     private static func refetchResponse(for config: Config) {
         guard let url = TranslationService.buildURL(config: config) else { return }
         Task {
-            do {
-                let data = try await TranslationService.fetchJSON(from: url, debug: config.debug)
-                let response = try JSONDecoder().decode(JSONResponse.self, from: data)
-                adoptResponse(response, for: config.environment)
-            } catch {
-                log.error("Failed to refetch environment.json for “\(config.environment, privacy: .public)”: \(error.localizedDescription, privacy: .public)")
-                Task {
-                    _ = await ErrorReporting.sendError(msg: "Failed to refetch environment.json after resetEnvironment", fn: #function, config: config)
+            for attempt in 1...refetchAttempts {
+                do {
+                    let data = try await TranslationService.fetchJSON(from: url, debug: config.debug)
+                    let response = try JSONDecoder().decode(JSONResponse.self, from: data)
+                    adoptResponse(response, for: config.environment)
+                    return
+                } catch {
+                    log.error("Refetch of environment.json for “\(config.environment, privacy: .public)” failed (attempt \(attempt)/\(refetchAttempts)): \(error.localizedDescription, privacy: .public)")
+                    if attempt == refetchAttempts {
+                        Task {
+                            _ = await ErrorReporting.sendError(msg: "Failed to refetch environment.json after resetEnvironment", fn: #function, config: config)
+                        }
+                    } else {
+                        try? await Task.sleep(nanoseconds: UInt64(_refetchRetryDelay * 1_000_000_000))
+                    }
                 }
             }
         }
@@ -376,7 +458,10 @@ public class Enforce {
 
     /// The environment passed to `configure(_:)`, before any stored
     /// override was applied. Used by `resetEnvironment()`.
-    internal static var configuredEnvironment: String?
+    internal static var configuredEnvironment: String? {
+        get { stateQueue.sync { _configuredEnvironment } }
+        set { stateQueue.sync { _configuredEnvironment = newValue } }
+    }
 
     /// Returns the config with a persisted, unexpired `setEnvironment()`
     /// override applied; otherwise returns the config as-is. The override
@@ -493,8 +578,7 @@ public class Enforce {
             // Successfully fetched. Store new config, adopt the new
             // environment's response, and persist the override so future
             // launches keep this environment (until consent expires).
-            storedConfig = updatedConfig
-            Enforce.adoptResponse(response, for: environment)
+            adoptEnvironmentSwitch(config: updatedConfig, response: response)
             ConsentStore.saveEnvironmentOverride(environment)
             log.info("Environment updated to: \(environment, privacy: .public)")
         } catch {

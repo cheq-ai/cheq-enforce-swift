@@ -23,6 +23,7 @@ final class EnvironmentOverrideTests: XCTestCase {
         wipeStore()
         Enforce.lastResponse = nil
         Enforce.configuredEnvironmentResponse = nil
+        Enforce.revertPending = false
         super.tearDown()
     }
 
@@ -373,6 +374,45 @@ final class EnvironmentOverrideTests: XCTestCase {
             while Enforce.lastResponse?.clientId != "englishClient" {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 2.0)
+    }
+
+    func testFailedResetRefetchReportsNilConfigurationButKeepsBeaconResponse() {
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        Enforce._refetchRetryDelay = 0.01
+        defer {
+            TranslationService._testProtocolClasses = nil
+            Enforce._refetchRetryDelay = 2
+            URLProtocolMock.reset()
+        }
+        URLProtocolMock.responder = { _ in (500, Data("//HTTP:error".utf8)) }
+
+        Enforce.configuredEnvironment = "English"
+        Enforce.configuredEnvironmentResponse = nil
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.lastResponse = makeResponse(clientId: "frenchClient")
+
+        Enforce.resetEnvironment()
+
+        XCTAssertEqual(Enforce.getEnvironment(), "English")
+        XCTAssertNil(Enforce.getConfiguration(),
+                     "While the revert is pending, the abandoned document must not be served")
+        XCTAssertNotNil(Enforce.lastResponse,
+                        "Beacons keep the previous response while the revert is pending")
+
+        // Let all (shortened) retries fail, then confirm the pending state
+        // persists and a later successful adoption recovers it.
+        let exp = expectation(description: "revert recovers once a fetch succeeds")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            XCTAssertNil(Enforce.getConfiguration(),
+                         "After all retries fail, getConfiguration() must stay nil rather than serve the abandoned document")
+
+            Enforce.adoptResponse(self.makeResponse(clientId: "englishClient"), for: "English")
+
+            XCTAssertEqual(Enforce.getConfiguration()?.clientId, "englishClient",
+                           "A successful adoption must clear the pending revert")
             exp.fulfill()
         }
         wait(for: [exp], timeout: 2.0)
