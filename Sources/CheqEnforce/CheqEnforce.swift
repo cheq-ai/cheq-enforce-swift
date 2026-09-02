@@ -177,6 +177,7 @@ public class Enforce {
         // if one is still within its expiration.
         configuredEnvironment = config.environment
         configuredEnvironmentResponse = nil
+        revertPending = false
         let config = applyingStoredEnvironment(config)
 
         //Build environment.json URL from configuration values
@@ -445,6 +446,10 @@ public class Enforce {
                 } catch {
                     log.error("Refetch of environment.json for “\(config.environment, privacy: .public)” failed (attempt \(attempt)/\(refetchAttempts)): \(error.localizedDescription, privacy: .public)")
                     if attempt == refetchAttempts {
+                        // Give up: stop gating getConfiguration() so a transient
+                        // failure can't wedge it at nil for the rest of the
+                        // session. It falls back to the last known response.
+                        revertPending = false
                         Task {
                             _ = await ErrorReporting.sendError(msg: "Failed to refetch environment.json after resetEnvironment", fn: #function, config: config)
                         }

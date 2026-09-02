@@ -402,20 +402,22 @@ final class EnvironmentOverrideTests: XCTestCase {
         XCTAssertNotNil(Enforce.lastResponse,
                         "Beacons keep the previous response while the revert is pending")
 
-        // Let all (shortened) retries fail, then confirm the pending state
-        // persists and a later successful adoption recovers it.
-        let exp = expectation(description: "revert recovers once a fetch succeeds")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            XCTAssertNil(Enforce.getConfiguration(),
-                         "After all retries fail, getConfiguration() must stay nil rather than serve the abandoned document")
-
-            Enforce.adoptResponse(self.makeResponse(clientId: "englishClient"), for: "English")
-
-            XCTAssertEqual(Enforce.getConfiguration()?.clientId, "englishClient",
-                           "A successful adoption must clear the pending revert")
+        // Once all (shortened) retries fail, the pending gate must clear so
+        // getConfiguration() can't stay wedged at nil for the session; it
+        // falls back to the last known response.
+        let exp = expectation(description: "revert gate clears after retries exhaust")
+        Task {
+            while Enforce.revertPending {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
             exp.fulfill()
         }
         wait(for: [exp], timeout: 2.0)
+
+        XCTAssertNotNil(Enforce.getConfiguration(),
+                        "After retries exhaust, getConfiguration() must recover rather than wedge at nil")
+        XCTAssertNotNil(Enforce.lastResponse,
+                        "Beacons keep working across the failed revert")
     }
 
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
