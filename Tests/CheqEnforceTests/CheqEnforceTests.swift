@@ -186,7 +186,7 @@ final class EnforceTests: XCTestCase {
       TranslationService._testProtocolClasses = nil
       URLProtocol.unregisterClass(URLProtocolMock.self)
       URLProtocolMock.reset()
-      Enforce.lastResponse = nil
+      Enforce._clearResponse()
     }
     URLProtocolMock.responder = { request in
       guard request.url?.path.contains("environment.json") == true else { return (204, Data()) }

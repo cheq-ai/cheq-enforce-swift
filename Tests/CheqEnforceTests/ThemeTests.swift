@@ -75,6 +75,45 @@ final class ThemeTests: XCTestCase {
         XCTAssertNil(theme.modal?.logoUIImage, "Programmatic logo must not decode from JSON")
     }
 
+    func testUnknownTokenValuesDecodeAsAbsentInsteadOfFailingTheTheme() throws {
+        // A newer theme document may carry token values this SDK version
+        // doesn't know. They must decode as absent — so the token's default
+        // applies — rather than throwing away the whole theme.
+        let json = """
+        {
+          "banner": {
+            "logoAlignment": "top",
+            "backgroundColor": "#FFFFFF",
+            "summary": {
+              "description": { "fontWeight": "ultralight", "textAlignment": "diagonal", "textColor": "#000000" }
+            },
+            "buttons": { "acceptAll": { "fontWeight": "black", "backgroundColor": "#1E478F" } }
+          },
+          "modal": { "presentationStyle": "sheet", "logoAlignment": "center" }
+        }
+        """
+        let theme = try JSONDecoder().decode(EnforceTheme.self, from: Data(json.utf8))
+
+        XCTAssertNil(theme.banner?.logoAlignment, "Unknown logoAlignment decodes as absent")
+        XCTAssertNil(theme.banner?.summary?.description?.fontWeight)
+        XCTAssertNil(theme.banner?.summary?.description?.textAlignment)
+        XCTAssertNil(theme.banner?.buttons?.acceptAll?.fontWeight)
+        XCTAssertNil(theme.modal?.presentationStyle)
+
+        // Every sibling token in the same document still decodes.
+        XCTAssertEqual(theme.banner?.backgroundColor, "#FFFFFF")
+        XCTAssertEqual(theme.banner?.summary?.description?.textColor, "#000000")
+        XCTAssertEqual(theme.banner?.buttons?.acceptAll?.backgroundColor, "#1E478F")
+        XCTAssertEqual(theme.modal?.logoAlignment, .center)
+    }
+
+    func testStructurallyInvalidTokenStillFailsTheDecode() {
+        // Rule: a *wrong type* is a structurally invalid document and still
+        // surfaces as a decoding error, unlike an unknown string value.
+        let json = #"{ "banner": { "logoAlignment": 3 } }"#
+        XCTAssertThrowsError(try JSONDecoder().decode(EnforceTheme.self, from: Data(json.utf8)))
+    }
+
     func testDecodePartialJSONFallsBackToNil() throws {
         let json = """
         { "banner": { "buttons": { "acceptAll": { "backgroundColor": "#FF0000" } } } }

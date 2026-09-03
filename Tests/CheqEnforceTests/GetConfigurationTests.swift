@@ -3,13 +3,31 @@ import XCTest
 
 final class GetConfigurationTests: XCTestCase {
 
+    /// Environment these tests adopt responses for. Distinct from the names
+    /// other suites use, so a leaked `configuredEnvironment` can't make
+    /// `adoptResponse` also stash a configured-environment snapshot here.
+    private let environment = "getConfigurationEnv"
+
+    private func makeConfig() -> Config {
+        Config("testClient", publishPath: "testPath", environment: environment, autoShow: false)
+    }
+
+    /// Installs `response` as the effective one, the way a completed fetch
+    /// does — response and environment tag written together.
+    private func adopt(_ response: JSONResponse) {
+        Enforce.storedConfig = makeConfig()
+        Enforce.adoptResponse(response, for: environment)
+    }
+
     override func tearDown() {
-        Enforce.lastResponse = nil
+        Enforce._clearResponse()
+        Enforce.storedConfig = nil
+        Enforce.configuredEnvironmentResponse = nil
         super.tearDown()
     }
 
     func testGetConfigurationNilBeforeFetchCompletes() {
-        Enforce.lastResponse = nil
+        Enforce._clearResponse()
         XCTAssertNil(Enforce.getConfiguration(), "getConfiguration() must be nil before configure() finishes fetching")
     }
 
@@ -28,7 +46,7 @@ final class GetConfigurationTests: XCTestCase {
             close: "Close",
             cookies: ["Analytics": CookieDetails(title: "Analytics", description: "Tracks usage")]
         )
-        Enforce.lastResponse = JSONResponse(
+        adopt(JSONResponse(
             clientId: "client-123",
             version: "7",
             enforcement: true,
@@ -47,7 +65,7 @@ final class GetConfigurationTests: XCTestCase {
                 ensSaveModal: BannerConfigItem(show: true),
                 ensCloseModal: nil
             )
-        )
+        ))
 
         let configuration = Enforce.getConfiguration()
 
@@ -76,7 +94,7 @@ final class GetConfigurationTests: XCTestCase {
     }
 
     func testGetConfigurationOmitsMissingBannerAndModalConfig() {
-        Enforce.lastResponse = JSONResponse(
+        adopt(JSONResponse(
             clientId: "client-123",
             version: "1",
             enforcement: false,
@@ -98,7 +116,7 @@ final class GetConfigurationTests: XCTestCase {
             ),
             bannerConfig: nil,
             consentModalConfig: nil
-        )
+        ))
 
         let configuration = Enforce.getConfiguration()
 

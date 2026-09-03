@@ -19,7 +19,7 @@ A theme has two independent sections, `banner` and `modal`. **Every key is optio
 
 1. **Buttons**: each property resolves as `specific button → buttons.global → framework default`, *per property* (e.g. a button may take its `backgroundColor` from `acceptAll` and its `borderRadius` from `global`).
 2. **Everything else**: `value → framework default`.
-3. **Invalid values never fail the UI**: a bad hex string or unknown font name is logged (subsystem `Cheq`) and the default is used. A structurally invalid document (wrong types, malformed JSON) fails to *decode*, and the error surfaces at `EnforceTheme(bundleFile:)` / `JSONDecoder`.
+3. **Invalid values never fail the UI**: a bad hex string, an unknown font name, or an unrecognized value of an enumerated token (`logoAlignment`, `fontWeight`, `textAlignment`, `presentationStyle`) is logged (subsystem `Cheq`) and only that token takes its default. A structurally invalid document (wrong types, malformed JSON) fails to *decode*, and the error surfaces at `EnforceTheme(bundleFile:)` / `JSONDecoder`.
 4. **Empty string `""` means "not set"** and falls through like an omitted key.
 5. Themed UI is **light-mode based**; the `appearance` configuration setting is ignored when a theme is present (a log message notes this).
 

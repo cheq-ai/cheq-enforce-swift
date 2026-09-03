@@ -103,6 +103,15 @@ public struct EnforceTheme: Codable {
             self.textAlignment = textAlignment
             self.textColor = textColor
         }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            fontName = try container.decodeIfPresent(String.self, forKey: .fontName)
+            fontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize)
+            fontWeight = try container.decodeToken(FontWeight.self, forKey: .fontWeight)
+            textAlignment = try container.decodeToken(TextAlignment.self, forKey: .textAlignment)
+            textColor = try container.decodeIfPresent(String.self, forKey: .textColor)
+        }
     }
 
     /// Styling for a single button. Any missing value falls back to the
@@ -133,6 +142,18 @@ public struct EnforceTheme: Codable {
             self.borderColor = borderColor
             self.borderWidth = borderWidth
             self.borderRadius = borderRadius
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            backgroundColor = try container.decodeIfPresent(String.self, forKey: .backgroundColor)
+            fontName = try container.decodeIfPresent(String.self, forKey: .fontName)
+            fontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize)
+            fontWeight = try container.decodeToken(FontWeight.self, forKey: .fontWeight)
+            textColor = try container.decodeIfPresent(String.self, forKey: .textColor)
+            borderColor = try container.decodeIfPresent(String.self, forKey: .borderColor)
+            borderWidth = try container.decodeIfPresent(CGFloat.self, forKey: .borderWidth)
+            borderRadius = try container.decodeIfPresent(CGFloat.self, forKey: .borderRadius)
         }
     }
 
@@ -265,6 +286,18 @@ public struct EnforceTheme: Codable {
             self.buttons = buttons
             self.logoUIImage = logoUIImage
         }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            logoURL = try container.decodeIfPresent(String.self, forKey: .logoURL)
+            logoImage = try container.decodeIfPresent(String.self, forKey: .logoImage)
+            logoAlignment = try container.decodeToken(LogoAlignment.self, forKey: .logoAlignment)
+            backgroundColor = try container.decodeIfPresent(String.self, forKey: .backgroundColor)
+            separatorColor = try container.decodeIfPresent(String.self, forKey: .separatorColor)
+            overlayColor = try container.decodeIfPresent(String.self, forKey: .overlayColor)
+            summary = try container.decodeIfPresent(Summary.self, forKey: .summary)
+            buttons = try container.decodeIfPresent(BannerButtons.self, forKey: .buttons)
+        }
     }
 
     /// EnforceTheme for the consent preferences modal.
@@ -312,6 +345,38 @@ public struct EnforceTheme: Codable {
             self.categories = categories
             self.logoUIImage = logoUIImage
         }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            presentationStyle = try container.decodeToken(ModalPresentationStyle.self, forKey: .presentationStyle)
+            logoURL = try container.decodeIfPresent(String.self, forKey: .logoURL)
+            logoImage = try container.decodeIfPresent(String.self, forKey: .logoImage)
+            logoAlignment = try container.decodeToken(LogoAlignment.self, forKey: .logoAlignment)
+            backgroundColor = try container.decodeIfPresent(String.self, forKey: .backgroundColor)
+            separatorColor = try container.decodeIfPresent(String.self, forKey: .separatorColor)
+            overlayColor = try container.decodeIfPresent(String.self, forKey: .overlayColor)
+            summary = try container.decodeIfPresent(Summary.self, forKey: .summary)
+            buttons = try container.decodeIfPresent(ModalButtons.self, forKey: .buttons)
+            categories = try container.decodeIfPresent(Categories.self, forKey: .categories)
+        }
+    }
+}
+
+// MARK: - Lenient token decoding
+
+private extension KeyedDecodingContainer {
+    /// Decodes an optional token enum (`logoAlignment`, `fontWeight`, …)
+    /// leniently: an unrecognized value is logged and treated as absent, so
+    /// the token's default applies instead of failing the whole theme decode
+    /// — the forward-compatibility rule in ``ThemeReference``.
+    func decodeToken<T: RawRepresentable & Decodable>(_ type: T.Type, forKey key: Key) throws -> T?
+    where T.RawValue == String {
+        guard let raw = try decodeIfPresent(String.self, forKey: key) else { return nil }
+        guard let token = T(rawValue: raw) else {
+            log.info("Unknown \(key.stringValue, privacy: .public) value “\(raw, privacy: .public)”; using the default.")
+            return nil
+        }
+        return token
     }
 }
 
