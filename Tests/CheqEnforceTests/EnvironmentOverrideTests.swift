@@ -739,6 +739,54 @@ final class EnvironmentOverrideTests: XCTestCase {
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1)
     }
 
+    func testSupersededRefetchCycleDoesNotReleaseTheGuardOfALiveOne() {
+        // The in-flight guard belongs to the cycle that took it: a cycle
+        // retired mid-flight must not release the guard a later one now
+        // holds, or two cycles run at once.
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        Enforce._refetchRetryDelay = 0.3
+        Enforce._refetchCoolDown = 0
+        defer {
+            TranslationService._testProtocolClasses = nil
+            Enforce._refetchRetryDelay = 2
+            URLProtocolMock.reset()
+        }
+
+        let requests = RequestCounter()
+        URLProtocolMock.responder = { _ in
+            requests.record()
+            return (500, Data("//HTTP:error".utf8))
+        }
+
+        Enforce.configuredEnvironment = "English"
+        Enforce.configuredEnvironmentResponse = nil
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.adoptResponse(makeResponse(clientId: "frenchClient"), for: "French")
+
+        Enforce.resetEnvironment()
+        waitForPoll("the first cycle issues its first attempt", timeout: 2.0) {
+            requests.value >= 1
+        }
+
+        // Retire that cycle while it sleeps between attempts, as
+        // configure() does, then arm a second one.
+        Enforce._resetRefetchState()
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.resetEnvironment()
+        XCTAssertTrue(Enforce.refetchInFlightForTests, "The second cycle holds the guard")
+
+        // A stale release would let one of these reads start a third cycle.
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline && Enforce.refetchInFlightForTests {
+            XCTAssertNil(Enforce.getConfiguration())
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        XCTAssertEqual(requests.value, 4,
+                       "One attempt from the retired cycle, which stops on supersession, and one full cycle of three")
+    }
+
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
         Enforce.configure(makeConfig(environment: "English"))
 

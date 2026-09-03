@@ -19,6 +19,10 @@ public class Enforce {
     /// from `getConfiguration()` or a repeat `resetEnvironment()`.
     private static var _pendingRefetchConfig: Config?
     private static var _refetchInFlight = false
+    /// Identifies the cycle holding `_refetchInFlight`. A superseded cycle
+    /// must not release the guard, stamp a give-up, or keep retrying: all of
+    /// that belongs to whichever cycle is current.
+    private static var _refetchGeneration = 0
     /// Bound the cost of an unreachable environment: one cycle per cool-down
     /// however often it is read, and one beacon per owed refetch. Stamped on
     /// the monotonic clock, since a wall-clock jump backwards would leave a
@@ -114,7 +118,7 @@ public class Enforce {
 
     /// Test hook: clears the environment-refetch bookkeeping.
     static func _resetRefetchState() {
-        stateQueue.sync { _clearOwedRefetch(); _refetchInFlight = false }
+        stateQueue.sync { _clearOwedRefetch(); _cancelRefetchCycle() }
     }
 
     /// Test hook: the one transition `adoptResponse(_:for:)` can't express —
@@ -130,6 +134,23 @@ public class Enforce {
         _pendingRefetchConfig = nil
         _refetchExhaustedAt = nil
         _refetchExhaustionReported = false
+    }
+
+    /// Must only be called on `stateQueue`.
+    private static func _beginRefetchCycle() -> Int {
+        _refetchInFlight = true
+        _refetchGeneration += 1
+        return _refetchGeneration
+    }
+
+    /// Must only be called on `stateQueue`.
+    private static func _cancelRefetchCycle() {
+        _refetchInFlight = false
+        _refetchGeneration += 1
+    }
+
+    private static func refetchCycleIsCurrent(_ generation: Int) -> Bool {
+        stateQueue.sync { generation == _refetchGeneration }
     }
 
     /// Adopt logic shared by the synchronized entry points below.
@@ -237,7 +258,7 @@ public class Enforce {
             _configuredEnvironmentResponse = nil
             _storedConfig = config
             _clearOwedRefetch()
-            _refetchInFlight = false
+            _cancelRefetchCycle()
         }
         
         // Trigger consent callbacks when there is consent to report; an empty
@@ -366,7 +387,7 @@ public class Enforce {
     ///   document. A failed refetch is retried here on demand, at most one
     ///   cycle per cool-down however often this is called.
     public static func getConfiguration() -> EnforceConfiguration? {
-        let (response, retry): (JSONResponse?, Config?) = stateQueue.sync {
+        let (response, retry): (JSONResponse?, (config: Config, generation: Int)?) = stateQueue.sync {
             guard _lastResponseEnvironment == _storedConfig?.environment else {
                 // Tag mismatch: report nil, and re-arm the owed refetch so a
                 // later call recovers once the network does.
@@ -377,12 +398,11 @@ public class Enforce {
                    monotonicSeconds(since: exhaustedAt) < _refetchCoolDown {
                     return (nil, nil)
                 }
-                _refetchInFlight = true
-                return (nil, pending)
+                return (nil, (pending, _beginRefetchCycle()))
             }
             return (_lastResponse, nil)
         }
-        if let retry { refetchResponse(for: retry) }
+        if let retry { refetchResponse(for: retry.config, generation: retry.generation) }
         guard let response else { return nil }
         return EnforceConfiguration(from: response)
     }
@@ -471,7 +491,7 @@ public class Enforce {
         // One atomic transition. The override's response stays until a
         // replacement is adopted, because beacons are gated on lastResponse
         // and nilling it would drop consent reporting.
-        let refetchConfig: Config? = stateQueue.sync {
+        let refetch: (config: Config, generation: Int)? = stateQueue.sync {
             guard let currentConfig = _storedConfig else {
                 log.info("resetEnvironment(): no stored config; nothing to reset.")
                 return nil
@@ -493,8 +513,7 @@ public class Enforce {
                 }
                 log.info("resetEnvironment(): already using configured “\(original, privacy: .public)”; retrying its owed refetch now.")
                 _refetchExhaustedAt = nil
-                _refetchInFlight = true
-                return pending
+                return (pending, _beginRefetchCycle())
             }
             let revertedConfig = replacingEnvironment(of: currentConfig, with: original)
             _storedConfig = revertedConfig
@@ -509,11 +528,10 @@ public class Enforce {
             // document, while beacons keep using lastResponse.
             _clearOwedRefetch()
             _pendingRefetchConfig = revertedConfig
-            _refetchInFlight = true
-            return revertedConfig
+            return (revertedConfig, _beginRefetchCycle())
         }
-        if let refetchConfig {
-            refetchResponse(for: refetchConfig)
+        if let refetch {
+            refetchResponse(for: refetch.config, generation: refetch.generation)
         }
     }
 
@@ -542,8 +560,9 @@ public class Enforce {
     /// Stamps a give-up for the cool-down and beacons it once per owed
     /// refetch, not once per cycle. `fn` defaults at the call site so the
     /// beacon names the refetch entry point, not this helper.
-    private static func noteRefetchGiveUp(config: Config, msg: String, fn: String = #function) {
+    private static func noteRefetchGiveUp(config: Config, generation: Int, msg: String, fn: String = #function) {
         let firstGiveUp: Bool = stateQueue.sync {
+            guard generation == _refetchGeneration else { return false }
             _refetchExhaustedAt = DispatchTime.now()
             guard !_refetchExhaustionReported else { return false }
             _refetchExhaustionReported = true
@@ -561,21 +580,27 @@ public class Enforce {
     /// Fetches and adopts `environment.json` for the given config in the
     /// background, retrying a bounded number of times; a response for a
     /// since-superseded environment is discarded and ends the attempts.
-    private static func refetchResponse(for config: Config) {
+    private static func refetchResponse(for config: Config, generation: Int) {
         Task {
-            // Release the guard on every exit, leaving `_pendingRefetchConfig`
-            // set for a later on-demand retry. The URL is built inside the
-            // Task so an unbuildable one releases it too, rather than wedging
+            // Release on every exit, leaving `_pendingRefetchConfig` set for
+            // a later on-demand retry. The URL is built inside the Task so an
+            // unbuildable one releases too, rather than wedging
             // getConfiguration() at nil.
-            defer { stateQueue.sync { _refetchInFlight = false } }
+            defer {
+                stateQueue.sync {
+                    guard generation == _refetchGeneration else { return }
+                    _refetchInFlight = false
+                }
+            }
             guard let url = TranslationService.buildURL(config: config) else {
                 log.error("Refetch of environment.json skipped: no URL could be built for “\(config.environment, privacy: .public)”.")
                 // Nothing to retry until the config changes, so stamp and
                 // report it like an exhausted cycle.
-                noteRefetchGiveUp(config: config, msg: "Failed to refetch environment.json after resetEnvironment: no URL could be built")
+                noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json after resetEnvironment: no URL could be built")
                 return
             }
             for attempt in 1...refetchAttempts {
+                guard refetchCycleIsCurrent(generation) else { return }
                 do {
                     let data = try await TranslationService.fetchJSON(from: url, debug: config.debug)
                     let response = try JSONDecoder().decode(JSONResponse.self, from: data)
@@ -584,7 +609,7 @@ public class Enforce {
                 } catch {
                     log.error("Refetch of environment.json for “\(config.environment, privacy: .public)” failed (attempt \(attempt)/\(refetchAttempts)): \(error.localizedDescription, privacy: .public)")
                     if attempt == refetchAttempts {
-                        noteRefetchGiveUp(config: config, msg: "Failed to refetch environment.json after resetEnvironment")
+                        noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json after resetEnvironment")
                     } else {
                         try? await Task.sleep(nanoseconds: UInt64(_refetchRetryDelay * 1_000_000_000))
                     }
