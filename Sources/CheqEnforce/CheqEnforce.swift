@@ -597,7 +597,7 @@ public class Enforce {
                 log.error("Refetch of environment.json skipped: no URL could be built for “\(config.environment, privacy: .public)”.")
                 // Nothing to retry until the config changes, so stamp and
                 // report it like an exhausted cycle.
-                noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json after resetEnvironment: no URL could be built")
+                noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json: no URL could be built")
                 return
             }
             for attempt in 1...refetchAttempts {
@@ -610,7 +610,7 @@ public class Enforce {
                 } catch {
                     log.error("Refetch of environment.json for “\(config.environment, privacy: .public)” failed (attempt \(attempt)/\(refetchAttempts)): \(error.localizedDescription, privacy: .public)")
                     if attempt == refetchAttempts {
-                        noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json after resetEnvironment")
+                        noteRefetchGiveUp(config: config, generation: generation, msg: "Failed to refetch environment.json")
                     } else {
                         try? await Task.sleep(nanoseconds: UInt64(_refetchRetryDelay * 1_000_000_000))
                     }
