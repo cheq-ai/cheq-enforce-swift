@@ -582,10 +582,11 @@ public class Enforce {
     /// since-superseded environment is discarded and ends the attempts.
     private static func refetchResponse(for config: Config, generation: Int) {
         Task {
-            // Release on every exit, leaving `_pendingRefetchConfig` set for
-            // a later on-demand retry. The URL is built inside the Task so an
-            // unbuildable one releases too, rather than wedging
-            // getConfiguration() at nil.
+            // Release only while this cycle still owns the flag, leaving
+            // `_pendingRefetchConfig` set for a later on-demand retry; a
+            // superseded cycle must not release it, since the newer cycle
+            // holds it. The URL is built inside the Task so an unbuildable
+            // one releases too, rather than wedging getConfiguration() at nil.
             defer {
                 stateQueue.sync {
                     guard generation == _refetchGeneration else { return }
