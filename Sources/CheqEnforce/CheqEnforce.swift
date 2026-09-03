@@ -10,9 +10,16 @@ public class Enforce {
     private static let stateQueue = DispatchQueue(label: "com.cheq.CheqEnforce.state")
     private static var _storedConfig: Config?
     private static var _lastResponse: JSONResponse?
+    /// The environment `_lastResponse` was fetched for. `getConfiguration()`
+    /// serves the response only while this still matches the effective
+    /// environment, so a superseded document is never returned.
+    private static var _lastResponseEnvironment: String?
     private static var _configuredEnvironmentResponse: JSONResponse?
     private static var _configuredEnvironment: String?
-    private static var _revertPending = false
+    /// A refetch owed after an environment change, retried on demand by
+    /// `getConfiguration()`; `_refetchInFlight` prevents overlapping retries.
+    private static var _pendingRefetchConfig: Config?
+    private static var _refetchInFlight = false
 
     static var storedConfig: Config? {
         get { stateQueue.sync { _storedConfig } }
@@ -68,7 +75,7 @@ public class Enforce {
     
     static var lastResponse: JSONResponse? {
         get { stateQueue.sync { _lastResponse } }
-        set { stateQueue.sync { _lastResponse = newValue } }
+        set { stateQueue.sync { _lastResponse = newValue; _lastResponseEnvironment = _storedConfig?.environment } }
     }
 
     /// The configured (non-override) environment's response, kept so
@@ -78,13 +85,27 @@ public class Enforce {
         set { stateQueue.sync { _configuredEnvironmentResponse = newValue } }
     }
 
-    /// Whether a resetEnvironment() revert is still waiting for its refetch.
-    /// While set, getConfiguration() reports nil instead of the abandoned
-    /// environment's document; beacons keep using lastResponse.
-    static var revertPending: Bool {
-        get { stateQueue.sync { _revertPending } }
-        set { stateQueue.sync { _revertPending = newValue } }
+    #if DEBUG
+    /// Test hook: the environment `_lastResponse` is currently tagged for.
+    static var lastResponseEnvironment: String? {
+        stateQueue.sync { _lastResponseEnvironment }
     }
+
+    /// Test hook: whether an owed refetch is still pending. Only for tests.
+    static var refetchPending: Bool {
+        stateQueue.sync { _pendingRefetchConfig != nil }
+    }
+
+    /// Test hook: whether a refetch is currently running. Only for tests.
+    static var refetchInFlightForTests: Bool {
+        stateQueue.sync { _refetchInFlight }
+    }
+
+    /// Test hook: clears the environment-refetch bookkeeping. Only for tests.
+    static func _resetRefetchState() {
+        stateQueue.sync { _pendingRefetchConfig = nil; _refetchInFlight = false }
+    }
+    #endif
 
     /// Adopt logic shared by the synchronized entry points below.
     /// Must only be called on `stateQueue`.
@@ -94,7 +115,8 @@ public class Enforce {
             return false
         }
         _lastResponse = response
-        _revertPending = false
+        _lastResponseEnvironment = environment
+        _pendingRefetchConfig = nil
         if environment == _configuredEnvironment {
             _configuredEnvironmentResponse = response
         }
@@ -177,7 +199,7 @@ public class Enforce {
         // if one is still within its expiration.
         configuredEnvironment = config.environment
         configuredEnvironmentResponse = nil
-        revertPending = false
+        stateQueue.sync { _pendingRefetchConfig = nil; _refetchInFlight = false }
         let config = applyingStoredEnvironment(config)
 
         //Build environment.json URL from configuration values
@@ -305,13 +327,25 @@ public class Enforce {
     /// modal button configuration) fetched from the remote JSON file, so a
     /// customer can implement their own consent experience.
     ///
-    /// - Returns: the configuration, or `nil` if ``configure(_:)`` has not
-    ///   yet completed its asynchronous fetch, or while a
-    ///   ``resetEnvironment()`` revert is still waiting for its refetch.
+    /// - Returns: the configuration for the environment currently in effect,
+    ///   or `nil` when no document for that environment has been fetched yet —
+    ///   before ``configure(_:)``'s fetch completes, or after a
+    ///   ``setEnvironment(_:)`` / ``resetEnvironment()`` change whose refetch
+    ///   has not yet succeeded. It never returns another environment's
+    ///   document; a failed refetch is retried on the next call, so this may
+    ///   trigger a background refresh.
     public static func getConfiguration() -> EnforceConfiguration? {
-        let response: JSONResponse? = stateQueue.sync {
-            _revertPending ? nil : _lastResponse
+        let (response, retry): (JSONResponse?, Config?) = stateQueue.sync {
+            guard _lastResponseEnvironment == _storedConfig?.environment else {
+                // Another environment's document: report nil, and re-arm the
+                // owed refetch so a later call recovers once the network does.
+                guard let pending = _pendingRefetchConfig, !_refetchInFlight else { return (nil, nil) }
+                _refetchInFlight = true
+                return (nil, pending)
+            }
+            return (_lastResponse, nil)
         }
+        if let retry { refetchResponse(for: retry) }
         guard let response else { return nil }
         return EnforceConfiguration(from: response)
     }
@@ -415,7 +449,11 @@ public class Enforce {
                 _ = _adopt(snapshot, for: original)
                 return nil
             }
-            _revertPending = true
+            // No snapshot: owe a refetch. Until it lands, getConfiguration()
+            // sees the env-tag mismatch and reports nil rather than the
+            // abandoned document; beacons keep using lastResponse.
+            _pendingRefetchConfig = revertedConfig
+            _refetchInFlight = true
             return revertedConfig
         }
         if let refetchConfig {
@@ -437,6 +475,10 @@ public class Enforce {
     private static func refetchResponse(for config: Config) {
         guard let url = TranslationService.buildURL(config: config) else { return }
         Task {
+            // Release the in-flight guard on every exit; leave
+            // `_pendingRefetchConfig` untouched here so an exhausted refetch
+            // still gets retried on demand by getConfiguration().
+            defer { stateQueue.sync { _refetchInFlight = false } }
             for attempt in 1...refetchAttempts {
                 do {
                     let data = try await TranslationService.fetchJSON(from: url, debug: config.debug)
@@ -446,10 +488,6 @@ public class Enforce {
                 } catch {
                     log.error("Refetch of environment.json for “\(config.environment, privacy: .public)” failed (attempt \(attempt)/\(refetchAttempts)): \(error.localizedDescription, privacy: .public)")
                     if attempt == refetchAttempts {
-                        // Give up: stop gating getConfiguration() so a transient
-                        // failure can't wedge it at nil for the rest of the
-                        // session. It falls back to the last known response.
-                        revertPending = false
                         Task {
                             _ = await ErrorReporting.sendError(msg: "Failed to refetch environment.json after resetEnvironment", fn: #function, config: config)
                         }

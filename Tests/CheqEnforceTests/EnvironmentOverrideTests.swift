@@ -23,7 +23,7 @@ final class EnvironmentOverrideTests: XCTestCase {
         wipeStore()
         Enforce.lastResponse = nil
         Enforce.configuredEnvironmentResponse = nil
-        Enforce.revertPending = false
+        Enforce._resetRefetchState()
         super.tearDown()
     }
 
@@ -379,7 +379,7 @@ final class EnvironmentOverrideTests: XCTestCase {
         wait(for: [exp], timeout: 2.0)
     }
 
-    func testFailedResetRefetchReportsNilConfigurationButKeepsBeaconResponse() {
+    func testFailedResetRefetchNeverServesTheAbandonedEnvironmentsDocument() {
         TranslationService._testProtocolClasses = [URLProtocolMock.self]
         Enforce._refetchRetryDelay = 0.01
         defer {
@@ -398,26 +398,85 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         XCTAssertEqual(Enforce.getEnvironment(), "English")
         XCTAssertNil(Enforce.getConfiguration(),
-                     "While the revert is pending, the abandoned document must not be served")
+                     "The abandoned French document must not be served for English")
         XCTAssertNotNil(Enforce.lastResponse,
-                        "Beacons keep the previous response while the revert is pending")
+                        "Beacons keep the previous response across the revert")
 
-        // Once all (shortened) retries fail, the pending gate must clear so
-        // getConfiguration() can't stay wedged at nil for the session; it
-        // falls back to the last known response.
-        let exp = expectation(description: "revert gate clears after retries exhaust")
+        // Let all (shortened) retries fail.
+        let exp = expectation(description: "refetch exhausts its retries")
         Task {
-            while Enforce.revertPending {
+            while Enforce.refetchInFlightForTests {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
             exp.fulfill()
         }
         wait(for: [exp], timeout: 2.0)
 
-        XCTAssertNotNil(Enforce.getConfiguration(),
-                        "After retries exhaust, getConfiguration() must recover rather than wedge at nil")
-        XCTAssertNotNil(Enforce.lastResponse,
-                        "Beacons keep working across the failed revert")
+        // Even after giving up, getConfiguration() must still report nil for
+        // English rather than the French document, and the owed refetch stays
+        // pending so a later call can recover.
+        XCTAssertNil(Enforce.getConfiguration(),
+                     "After the retries exhaust, the French document must still not be served for English")
+        XCTAssertNotNil(Enforce.lastResponse, "Beacons keep working across the failed revert")
+
+        // A later successful adoption recovers it, so it can't wedge at nil.
+        Enforce.adoptResponse(makeResponse(clientId: "englishClient"), for: "English")
+        XCTAssertEqual(Enforce.getConfiguration()?.clientId, "englishClient",
+                       "A successful adoption for the effective environment recovers getConfiguration()")
+    }
+
+    func testGetConfigurationDemandRetryRecoversAfterTransientFailure() {
+        TranslationService._testProtocolClasses = [URLProtocolMock.self]
+        Enforce._refetchRetryDelay = 0.01
+        defer {
+            TranslationService._testProtocolClasses = nil
+            Enforce._refetchRetryDelay = 2
+            URLProtocolMock.reset()
+        }
+        // Fail every attempt of the first refetch cycle, then succeed.
+        let shouldFail = NSLock()
+        var failing = true
+        URLProtocolMock.responder = { _ in
+            shouldFail.lock(); defer { shouldFail.unlock() }
+            if failing { return (500, Data("//HTTP:error".utf8)) }
+            let json = """
+            {"clientId":"englishClient","version":"9","enforcement":false,
+             "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
+            """
+            return (200, Data(json.utf8))
+        }
+
+        Enforce.configuredEnvironment = "English"
+        Enforce.configuredEnvironmentResponse = nil
+        Enforce.storedConfig = makeConfig(environment: "French")
+        Enforce.lastResponse = makeResponse(clientId: "frenchClient")
+
+        Enforce.resetEnvironment()
+
+        // Wait for the initial (failing) cycle to give up.
+        let failed = expectation(description: "initial refetch cycle exhausts")
+        Task {
+            while Enforce.refetchInFlightForTests {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            failed.fulfill()
+        }
+        wait(for: [failed], timeout: 2.0)
+        XCTAssertNil(Enforce.getConfiguration(), "Still nil while the refetch is owed")
+        XCTAssertTrue(Enforce.refetchPending, "The owed refetch stays pending after a failed cycle")
+
+        // Let the network recover; a getConfiguration() call re-arms the retry.
+        shouldFail.lock(); failing = false; shouldFail.unlock()
+        _ = Enforce.getConfiguration()   // triggers the demand-driven retry
+
+        let recovered = expectation(description: "demand-driven retry recovers")
+        Task {
+            while Enforce.getConfiguration()?.clientId != "englishClient" {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            recovered.fulfill()
+        }
+        wait(for: [recovered], timeout: 2.0)
     }
 
     func testSetEnvironmentWhitespaceOnlyThrowsInvalidEnvironment() async {
