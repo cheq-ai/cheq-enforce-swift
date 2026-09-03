@@ -20,8 +20,10 @@ public class Enforce {
     private static var _pendingRefetchConfig: Config?
     private static var _refetchInFlight = false
     /// Bound the cost of an unreachable environment: one cycle per cool-down
-    /// however often it is read, and one beacon per owed refetch.
-    private static var _refetchExhaustedAt: Date?
+    /// however often it is read, and one beacon per owed refetch. Stamped on
+    /// the monotonic clock, since a wall-clock jump backwards would leave a
+    /// cool-down that never expires.
+    private static var _refetchExhaustedAt: DispatchTime?
     private static var _refetchExhaustionReported = false
 
     static var storedConfig: Config? {
@@ -219,17 +221,24 @@ public class Enforce {
 
         // Remember the app-supplied environment so resetEnvironment() can
         // return to it, then apply any unexpired setEnvironment() override.
-        configuredEnvironment = config.environment
-        configuredEnvironmentResponse = nil
-        stateQueue.sync { _clearOwedRefetch(); _refetchInFlight = false }
+        let appEnvironment = config.environment
         let config = applyingStoredEnvironment(config)
 
-        //Build environment.json URL from configuration values
+        // Build environment.json URL from configuration values. A config
+        // that can't produce one leaves the previous state untouched.
         guard let url = TranslationService.buildURL(config: config) else { return }
         log.info("URL to retrieve translations: \(url)")
-        
-        // Store the config for later use
-        storedConfig = config
+
+        // One atomic install: the configured environment, its (not yet
+        // fetched) snapshot, the effective config, and a clean refetch slate,
+        // so a reader on another thread can't observe one without the others.
+        stateQueue.sync {
+            _configuredEnvironment = appEnvironment
+            _configuredEnvironmentResponse = nil
+            _storedConfig = config
+            _clearOwedRefetch()
+            _refetchInFlight = false
+        }
         
         // Trigger consent callbacks when there is consent to report; an empty
         // map is reserved for clearConsent()'s "consent revoked" signal.
@@ -365,7 +374,7 @@ public class Enforce {
                 // A per-render or polling reader must not turn an unreachable
                 // environment into continuous request traffic.
                 if let exhaustedAt = _refetchExhaustedAt,
-                   Date().timeIntervalSince(exhaustedAt) < _refetchCoolDown {
+                   monotonicSeconds(since: exhaustedAt) < _refetchCoolDown {
                     return (nil, nil)
                 }
                 _refetchInFlight = true
@@ -520,12 +529,22 @@ public class Enforce {
     private static let _refetchCoolDown: TimeInterval = 60
     #endif
 
+    /// Seconds elapsed since `start` on the monotonic uptime clock. The
+    /// ordering guard keeps the unsigned subtraction from underflowing into
+    /// a decades-long interval; zero elapsed holds the cool-down.
+    private static func monotonicSeconds(since start: DispatchTime) -> TimeInterval {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let then = start.uptimeNanoseconds
+        guard now > then else { return 0 }
+        return TimeInterval(now - then) / 1_000_000_000
+    }
+
     /// Stamps a give-up for the cool-down and beacons it once per owed
     /// refetch, not once per cycle. `fn` defaults at the call site so the
     /// beacon names the refetch entry point, not this helper.
     private static func noteRefetchGiveUp(config: Config, msg: String, fn: String = #function) {
         let firstGiveUp: Bool = stateQueue.sync {
-            _refetchExhaustedAt = Date()
+            _refetchExhaustedAt = DispatchTime.now()
             guard !_refetchExhaustionReported else { return false }
             _refetchExhaustionReported = true
             return true

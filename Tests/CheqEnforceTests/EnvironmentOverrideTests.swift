@@ -76,6 +76,67 @@ final class EnvironmentOverrideTests: XCTestCase {
         )
     }
 
+    /// Request tally for `URLProtocolMock` responders, which run on the URL
+    /// loading system's threads.
+    private final class RequestCounter {
+        private let lock = NSLock()
+        private var count = 0
+
+        func record() {
+            lock.lock(); count += 1; lock.unlock()
+        }
+
+        var value: Int {
+            lock.lock(); defer { lock.unlock() }
+            return count
+        }
+    }
+
+    /// Switch for responders that must fail and later recover.
+    private final class MockFailure {
+        private let lock = NSLock()
+        private var failing = true
+
+        var isFailing: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return failing
+        }
+
+        func recover() {
+            lock.lock(); failing = false; lock.unlock()
+        }
+    }
+
+    /// Blocks until the cycle in flight has adopted a response or given up.
+    private func waitForRefetchToSettle(_ description: String = "the refetch cycle settles",
+                                        timeout: TimeInterval = 2.0) {
+        waitForPoll(description, timeout: timeout) { !Enforce.refetchInFlightForTests }
+    }
+
+    /// Blocks until `getConfiguration()` serves that environment's document.
+    private func waitForConfiguration(clientId: String,
+                                      _ description: String = "getConfiguration() recovers",
+                                      timeout: TimeInterval = 2.0) {
+        waitForPoll(description, timeout: timeout) {
+            Enforce.getConfiguration()?.clientId == clientId
+        }
+    }
+
+    /// The refetch tests poll because the state they wait on is settled by
+    /// background tasks with nothing to await.
+    private func waitForPoll(_ description: String,
+                             timeout: TimeInterval,
+                             until condition: @escaping @Sendable () -> Bool) {
+        let settled = expectation(description: description)
+        Task {
+            while !condition() {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            settled.fulfill()
+        }
+        wait(for: [settled], timeout: timeout)
+    }
+
     // MARK: - ConsentStore storage
 
     func testOverrideRoundTrip() {
@@ -405,14 +466,7 @@ final class EnvironmentOverrideTests: XCTestCase {
                         "Beacons keep the previous response across the revert")
 
         // Let all (shortened) retries fail.
-        let exp = expectation(description: "refetch exhausts its retries")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            exp.fulfill()
-        }
-        wait(for: [exp], timeout: 2.0)
+        waitForRefetchToSettle("refetch exhausts its retries")
 
         // Even after giving up, getConfiguration() must still report nil for
         // English rather than the French document, and the owed refetch stays
@@ -441,14 +495,7 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         XCTAssertEqual(Enforce.getEnvironment(), "")
 
-        let released = expectation(description: "the in-flight guard is released")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            released.fulfill()
-        }
-        wait(for: [released], timeout: 2.0)
+        waitForRefetchToSettle("the in-flight guard is released")
 
         XCTAssertTrue(Enforce.refetchPending, "The owed refetch stays pending for a later retry")
         XCTAssertNil(Enforce.getConfiguration(), "The abandoned French document must not be served")
@@ -470,11 +517,9 @@ final class EnvironmentOverrideTests: XCTestCase {
             URLProtocolMock.reset()
         }
         // Fail every attempt of the first refetch cycle, then succeed.
-        let shouldFail = NSLock()
-        var failing = true
+        let network = MockFailure()
         URLProtocolMock.responder = { _ in
-            shouldFail.lock(); defer { shouldFail.unlock() }
-            if failing { return (500, Data("//HTTP:error".utf8)) }
+            if network.isFailing { return (500, Data("//HTTP:error".utf8)) }
             let json = """
             {"clientId":"englishClient","version":"9","enforcement":false,
              "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
@@ -490,29 +535,15 @@ final class EnvironmentOverrideTests: XCTestCase {
         Enforce.resetEnvironment()
 
         // Wait for the initial (failing) cycle to give up.
-        let failed = expectation(description: "initial refetch cycle exhausts")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            failed.fulfill()
-        }
-        wait(for: [failed], timeout: 2.0)
+        waitForRefetchToSettle("initial refetch cycle exhausts")
         XCTAssertNil(Enforce.getConfiguration(), "Still nil while the refetch is owed")
         XCTAssertTrue(Enforce.refetchPending, "The owed refetch stays pending after a failed cycle")
 
         // Let the network recover; a getConfiguration() call re-arms the retry.
-        shouldFail.lock(); failing = false; shouldFail.unlock()
+        network.recover()
         _ = Enforce.getConfiguration()   // triggers the demand-driven retry
 
-        let recovered = expectation(description: "demand-driven retry recovers")
-        Task {
-            while Enforce.getConfiguration()?.clientId != "englishClient" {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            recovered.fulfill()
-        }
-        wait(for: [recovered], timeout: 2.0)
+        waitForConfiguration(clientId: "englishClient", "demand-driven retry recovers")
     }
 
     func testExhaustedRefetchCoolsDownBeforeAnotherCycle() {
@@ -527,15 +558,10 @@ final class EnvironmentOverrideTests: XCTestCase {
             URLProtocolMock.reset()
         }
 
-        let counter = NSLock()
-        var requests = 0
+        let requests = RequestCounter()
         URLProtocolMock.responder = { _ in
-            counter.lock(); requests += 1; counter.unlock()
+            requests.record()
             return (500, Data("//HTTP:error".utf8))
-        }
-        func requestCount() -> Int {
-            counter.lock(); defer { counter.unlock() }
-            return requests
         }
 
         Enforce.configuredEnvironment = "English"
@@ -545,16 +571,9 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         Enforce.resetEnvironment()
 
-        let exhausted = expectation(description: "the first refetch cycle gives up")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            exhausted.fulfill()
-        }
-        wait(for: [exhausted], timeout: 2.0)
+        waitForRefetchToSettle("the first refetch cycle gives up")
 
-        let afterFirstCycle = requestCount()
+        let afterFirstCycle = requests.value
         XCTAssertEqual(afterFirstCycle, 3, "One cycle is three attempts")
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
                        "The give-up is beaconed once")
@@ -566,7 +585,7 @@ final class EnvironmentOverrideTests: XCTestCase {
         }
         XCTAssertFalse(Enforce.refetchInFlightForTests,
                        "No new cycle starts inside the cool-down")
-        XCTAssertEqual(requestCount(), afterFirstCycle,
+        XCTAssertEqual(requests.value, afterFirstCycle,
                        "Reads inside the cool-down issue no further requests")
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
                        "No further beacons inside the cool-down")
@@ -575,16 +594,9 @@ final class EnvironmentOverrideTests: XCTestCase {
         Enforce._refetchCoolDown = 0
         XCTAssertNil(Enforce.getConfiguration())
 
-        let secondCycle = expectation(description: "the re-armed cycle gives up")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            secondCycle.fulfill()
-        }
-        wait(for: [secondCycle], timeout: 2.0)
+        waitForRefetchToSettle("the re-armed cycle gives up")
 
-        XCTAssertEqual(requestCount(), afterFirstCycle * 2,
+        XCTAssertEqual(requests.value, afterFirstCycle * 2,
                        "Exactly one more cycle ran after the cool-down elapsed")
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
                        "The exhaustion beacon is sent once per owed refetch, not once per cycle")
@@ -605,14 +617,7 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         Enforce.resetEnvironment()
 
-        let released = expectation(description: "the in-flight guard is released")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            released.fulfill()
-        }
-        wait(for: [released], timeout: 2.0)
+        waitForRefetchToSettle("the in-flight guard is released")
 
         for _ in 0..<20 {
             XCTAssertNil(Enforce.getConfiguration())
@@ -632,14 +637,7 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         Enforce.resetEnvironment()
 
-        let released = expectation(description: "the in-flight guard is released")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            released.fulfill()
-        }
-        wait(for: [released], timeout: 2.0)
+        waitForRefetchToSettle("the in-flight guard is released")
 
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
                        "An unbuildable refetch URL is beaconed, not only logged")
@@ -648,14 +646,7 @@ final class EnvironmentOverrideTests: XCTestCase {
         Enforce._refetchCoolDown = 0
         XCTAssertNil(Enforce.getConfiguration())
 
-        let secondCycle = expectation(description: "the re-armed cycle gives up")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            secondCycle.fulfill()
-        }
-        wait(for: [secondCycle], timeout: 2.0)
+        waitForRefetchToSettle("the re-armed cycle gives up")
 
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
                        "The give-up is beaconed once per owed refetch, not once per cycle")
@@ -673,22 +664,16 @@ final class EnvironmentOverrideTests: XCTestCase {
             URLProtocolMock.reset()
         }
 
-        let lock = NSLock()
-        var failing = true
-        var requests = 0
+        let network = MockFailure()
+        let requests = RequestCounter()
         URLProtocolMock.responder = { _ in
-            lock.lock(); defer { lock.unlock() }
-            requests += 1
-            if failing { return (500, Data("//HTTP:error".utf8)) }
+            requests.record()
+            if network.isFailing { return (500, Data("//HTTP:error".utf8)) }
             let json = """
             {"clientId":"englishClient","version":"9","enforcement":false,
              "enablePrivacyNotice":false,"enableConsentModal":false,"translation":{}}
             """
             return (200, Data(json.utf8))
-        }
-        func requestCount() -> Int {
-            lock.lock(); defer { lock.unlock() }
-            return requests
         }
 
         Enforce.configuredEnvironment = "English"
@@ -698,38 +683,24 @@ final class EnvironmentOverrideTests: XCTestCase {
 
         Enforce.resetEnvironment()
 
-        let failed = expectation(description: "the first refetch cycle gives up")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            failed.fulfill()
-        }
-        wait(for: [failed], timeout: 2.0)
+        waitForRefetchToSettle("the first refetch cycle gives up")
 
-        let afterFirstCycle = requestCount()
+        let afterFirstCycle = requests.value
         XCTAssertEqual(afterFirstCycle, 3, "One cycle is three attempts")
         XCTAssertTrue(Enforce.refetchPending, "The owed refetch stays pending")
         XCTAssertEqual(Enforce.getEnvironment(), "English")
 
         // Cool-down left at its full 60s: only the reset may skip it.
         XCTAssertNil(Enforce.getConfiguration())
-        XCTAssertEqual(requestCount(), afterFirstCycle,
+        XCTAssertEqual(requests.value, afterFirstCycle,
                        "A read inside the cool-down issues no further requests")
 
         // Network back: the reset retries even though the environment
         // already matches the configured one.
-        lock.lock(); failing = false; lock.unlock()
+        network.recover()
         Enforce.resetEnvironment()
 
-        let recovered = expectation(description: "the reset-driven retry recovers")
-        Task {
-            while Enforce.getConfiguration()?.clientId != "englishClient" {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            recovered.fulfill()
-        }
-        wait(for: [recovered], timeout: 2.0)
+        waitForConfiguration(clientId: "englishClient", "the reset-driven retry recovers")
 
         XCTAssertFalse(Enforce.refetchPending, "A success clears the owed refetch")
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1,
@@ -746,15 +717,10 @@ final class EnvironmentOverrideTests: XCTestCase {
             URLProtocolMock.reset()
         }
 
-        let lock = NSLock()
-        var requests = 0
+        let requests = RequestCounter()
         URLProtocolMock.responder = { _ in
-            lock.lock(); requests += 1; lock.unlock()
+            requests.record()
             return (500, Data("//HTTP:error".utf8))
-        }
-        func requestCount() -> Int {
-            lock.lock(); defer { lock.unlock() }
-            return requests
         }
 
         Enforce.configuredEnvironment = "English"
@@ -767,16 +733,9 @@ final class EnvironmentOverrideTests: XCTestCase {
             Enforce.resetEnvironment()   // no-ops while the cycle is in flight
         }
 
-        let settled = expectation(description: "the single cycle gives up")
-        Task {
-            while Enforce.refetchInFlightForTests {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            }
-            settled.fulfill()
-        }
-        wait(for: [settled], timeout: 5.0)
+        waitForRefetchToSettle("the single cycle gives up", timeout: 5.0)
 
-        XCTAssertEqual(requestCount(), 3, "Exactly one cycle of three attempts ran")
+        XCTAssertEqual(requests.value, 3, "Exactly one cycle of three attempts ran")
         XCTAssertEqual(Enforce._refetchExhaustionBeacons, 1)
     }
 
