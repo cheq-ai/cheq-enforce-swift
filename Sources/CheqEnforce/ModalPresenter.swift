@@ -29,14 +29,14 @@ struct ModalPresenter {
             
             log.info("Presenting consent modal")
             
-            let sections: [(title: String, description: String)] =
+            let sections: [(key: String, title: String, description: String)] =
             (translation.cookies ?? [:])
                 .sorted { $0.key < $1.key }
-                .compactMap { (_, details) in
+                .compactMap { (key, details) in
                     guard let title = details.title,
                           let desc  = details.description
                     else { return nil }
-                    return (title: title, description: desc)
+                    return (key: key, title: title, description: desc)
                 }
             
             // Ensure modal title & description exist
@@ -56,18 +56,39 @@ struct ModalPresenter {
             let cancelTitle    = translation.cancel ?? ""
             
             // Instantiate and present
-            let modal = CustomConsentModalViewController(
-                title: consentTitle,
-                description: consentDescription,
-                modalConfig: consentModalConfig,
-                sections: sections,
-                config: config,
-                allowAllTitle: allowAllTitle,
-                denyAllTitle: denyAllTitle,
-                saveTitle: saveTitle,
-                cancelTitle: cancelTitle
-            )
-            rootVC.present(modal, animated: true, completion: nil)
+            let present: (UIImage?) -> Void = { logo in
+                let modal = CustomConsentModalViewController(
+                    title: consentTitle,
+                    description: consentDescription,
+                    modalConfig: consentModalConfig,
+                    sections: sections,
+                    config: config,
+                    allowAllTitle: allowAllTitle,
+                    denyAllTitle: denyAllTitle,
+                    saveTitle: saveTitle,
+                    cancelTitle: cancelTitle,
+                    logo: logo
+                )
+                Enforce.currentModal = modal
+                rootVC.present(modal, animated: true, completion: nil)
+            }
+
+            if let theme = config.theme {
+                // Themed modal: resolve the optional logo first. Themed UI is light-mode based.
+                if config.appearance != .default {
+                    log.info("Theme provided; ignoring 'appearance' setting; themed UI uses light mode.")
+                }
+                Task {
+                    let logo = await ThemeLogoLoader.load(
+                        uiImage: theme.modal?.logoUIImage,
+                        assetName: theme.modal?.logoImage,
+                        urlString: theme.modal?.logoURL
+                    )
+                    await MainActor.run { present(logo) }
+                }
+            } else {
+                present(nil)
+            }
         }
         
         if delay > 0 {

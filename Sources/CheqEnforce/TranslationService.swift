@@ -34,29 +34,44 @@ struct TranslationService {
         // start with the base URL
         guard var url = URL(string: baseURL) else { return nil }
         
-        // append each path component — handles percent-escaping
+        // append each path component; handles percent-escaping
         url.appendPathComponent("privacy")
         url.appendPathComponent("environments")
         url.appendPathComponent(client)
         url.appendPathComponent(path)
         url.appendPathComponent(env)
         url.appendPathComponent("environment.json")
-        
-        return url
+
+        // Tag the request with the SDK utm parameters
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        comps.queryItems = Info.utmQueryItems
+        return comps.url ?? url
     }
     
     /// Fetches JSON from a given URL using async/await.
     /// - Parameter url: The URL to fetch JSON from.
     /// - Returns: The fetched `Data` if successful.
     /// - Throws: An error if the request fails or data is missing.
+    #if DEBUG
+    /// Test hook: URLProtocol classes injected into the fetch session, so
+    /// tests can stub environment.json responses. Only for tests.
+    static var _testProtocolClasses: [AnyClass]?
+    #endif
+
     static func fetchJSON(from url: URL, debug: Bool) async throws -> Data {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 15
+        #if DEBUG
+        if let classes = _testProtocolClasses {
+            config.protocolClasses = classes
+        }
+        #endif
         let session = URLSession(configuration: config)
         
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
+        req.cachePolicy = .reloadRevalidatingCacheData
         
         HTTPLogger.logRequest(req, enabled: debug)
         let (data, resp) = try await session.data(for: req)
