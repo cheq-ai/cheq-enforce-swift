@@ -71,7 +71,9 @@ enum ErrorReporting {
         if let cid = clientId?.trimmingCharacters(in: .whitespacesAndNewlines), !cid.isEmpty {
             items.append(URLQueryItem(name: "cid", value: truncate(cid, 256)))
         }
-        
+
+        items.append(contentsOf: Info.utmQueryItems)
+
         comps.queryItems = items
 
         guard let url = comps.url else {

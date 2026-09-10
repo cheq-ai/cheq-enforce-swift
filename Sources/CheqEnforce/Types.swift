@@ -10,7 +10,8 @@ public struct Config {
     let version: String
     let defaultConsent: [String: Bool]?
     let appearance: Appearance
-    
+    let theme: EnforceTheme?
+
     /// Creates an Enforce Configuration
     /// - Parameters:
     ///   - clientName: client name
@@ -22,9 +23,13 @@ public struct Config {
     ///   - version: optional version that retriggers consent on change, default `1`
     ///   - defaultConsent: optional flag to set default consent, default `nil`
     ///   - appearance: UI appearance for banner & modal:
-    ///     - `.light`   — light‑mode look (white background, dark text)
-    ///     - `.dark`    — dark‑mode look (dark background, light text)
-    ///     - `.default` — use the system’s current interface style
+    ///     - `.light`: light-mode look (white background, dark text)
+    ///     - `.dark`: dark-mode look (dark background, light text)
+    ///     - `.default`: use the system’s current interface style
+    ///   - theme: optional visual customization, default `nil`. When provided,
+    ///     the banner is shown as a custom bottom sheet and the modal is styled
+    ///     with the theme's colors/fonts/logo. Themed UI is light-mode based and
+    ///     ignores `appearance`.
     public init(_ clientName: String,
                 publishPath: String,
                 environment: String,
@@ -33,7 +38,8 @@ public struct Config {
                 autoShow: Bool = true,
                 version: String = "1",
                 defaultConsent: [String: Bool]? = nil,
-                appearance: Appearance = .default) {
+                appearance: Appearance = .default,
+                theme: EnforceTheme? = nil) {
         self.clientName = clientName
         self.publishPath = publishPath
         self.environment = environment
@@ -43,6 +49,7 @@ public struct Config {
         self.version = version
         self.defaultConsent = defaultConsent
         self.appearance = appearance
+        self.theme = theme
     }
 }
 
